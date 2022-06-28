@@ -64,6 +64,14 @@ txt
 input.txt
 nohup.out
 
+# Visual Studio solution / project files
+.vs
+CppProperties.json
+*.pyproj*
+*.sln
+*.vcx*
+
+
 # Distribution / packaging
 .Python
 env/
