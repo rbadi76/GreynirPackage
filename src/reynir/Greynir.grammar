@@ -87,12 +87,6 @@
 # a single highest priority alternative should be automatically
 # selected from possible alternatives, use the '>' (greater than)
 # sign between the productions instead.
-#
-# For the Sublime Text editor, a syntax highlighting specification
-# for .grammar files, grammar.YAML-tmLanguage, is available.
-# It can be found in the GitHub repo subdirectory
-# https://github.com/mideind/Greynir/tree/master/resources
-# and its use is highly recommended.
 
 
 # VARIANT DEFINITIONS
