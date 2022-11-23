@@ -2,7 +2,7 @@
 
     Greynir: Natural language processing for Icelandic
 
-    Copyright (C) 2021 Miðeind ehf.
+    Copyright (C) 2022 Miðeind ehf.
 
     This software is licensed under the MIT License:
 
@@ -33,7 +33,6 @@
 from typing import Optional, Union, Callable, Tuple, List, Iterator, TypeVar, cast
 
 from abc import abstractmethod, ABCMeta
-from collections import OrderedDict
 
 from .bindb import BIN_Tuple
 from .bintokenizer import tokenize, TOK
@@ -42,7 +41,7 @@ from .bintokenizer import tokenize, TOK
 # In Python >= 3.8, the base class could be typing.Protocol
 class Comparable(metaclass=ABCMeta):
 
-    """ Protocol for annotating comparable types """
+    """Protocol for annotating comparable types"""
 
     @abstractmethod
     def __lt__(self: "CT", other: "CT") -> bool:
@@ -60,11 +59,11 @@ def simple_lemmatize(
     all_lemmas: bool = False,
     sortkey: Optional[Callable[[LemmaTuple], Comparable]] = None,
 ) -> Union[Iterator[LemmaTuple], Iterator[List[LemmaTuple]]]:
-    """ Simplistically lemmatize a list of tokens, returning a generator of
-        (lemma, category) tuples. The default behaviour is to return the
-        first lemma provided by bintokenizer. If all_lemmas are requested,
-        returns full list of potential lemmas. A sort function can be provided
-        to determine the ordering of that list. """
+    """Simplistically lemmatize a list of tokens, returning a generator of
+    (lemma, category) tuples. The default behaviour is to return the
+    first lemma provided by bintokenizer. If all_lemmas are requested,
+    returns full list of potential lemmas. A sort function can be provided
+    to determine the ordering of that list."""
     for t in tokenize(txt):
         y: Optional[List[LemmaTuple]] = None
         if t.kind == TOK.WORD:
@@ -76,7 +75,10 @@ def simple_lemmatize(
                 else:
                     # The original word doesn't contain a hyphen: any hyphens
                     # in the lemmas must come from the compounding algorithm
-                    y = [(v.stofn.replace("-", ""), v.ordfl) for v in cast(List[BIN_Tuple], t.val)]
+                    y = [
+                        (v.stofn.replace("-", ""), v.ordfl)
+                        for v in cast(List[BIN_Tuple], t.val)
+                    ]
             else:
                 # Unknown word: assume it's an entity
                 y = [(t.txt, "entity")]
@@ -91,7 +93,7 @@ def simple_lemmatize(
         if y is not None:
             # OK, we're returning one or more lemmas for this token
             # Remove duplicates while preserving order
-            y = list(OrderedDict.fromkeys(y))
+            y = list(dict.fromkeys(y))
             if sortkey is not None:
                 y.sort(key=sortkey)
             if all_lemmas:

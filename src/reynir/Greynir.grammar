@@ -4,7 +4,7 @@
 # A context-free grammar for modern Icelandic
 #
 # Greynir - a natural language processor for Icelandic
-# Copyright (C) 2021 Miðeind ehf.
+# Copyright (C) 2022 Miðeind ehf.
 #
 # This software is licensed under the MIT License:
 #
@@ -146,8 +146,13 @@ MgrInnihald →
     Forskeyti? Yfirsetning StLiður* Lokatákn?
     | Staðhæfing
 
+# "Allt er klárt," segir Jón og bætir við: "Komum þessu í gang."
 Staðhæfing →
-    Sagt Segjandi Lokatákn?
+    Sagt Segjandi ÁframSagt? Lokatákn?
+
+ÁframSagt →
+    Segir SegirÁfram Sagt
+
 
 Segjandi →
     Segir               # "Allt er klappað og klárt", segir Jón.
@@ -203,6 +208,15 @@ Segir →
     # , segir/fullyrðir Jón Ásmundsson, fulltrúi samtakanna, í dag í útvarpinu
     "," SögnSegja/tala/pers Heimild_nf/tala/pers AtvFsAuka?
 
+SegirÁfram →
+    "og:st" SögnSegja/tala/pers SegirLíka?
+    | "og:st" SögnSegjaÁfram/tala/pers
+
+$score(+999) SegirÁfram
+
+SegirLíka →
+    "einnig:ao" | "líka:ao"
+
 SögnSegja/tala/pers →
     'segja:so'_0_gm_fh/tala/pers
     | 'skrifa:so'_0_gm_fh/tala/pers
@@ -212,6 +226,10 @@ SögnSegja/tala/pers →
     | 'ítreka:so'_0_gm_fh/tala/pers
     | 'viðurkenna:so'_0_gm_fh/tala/pers
     | 'álíta:so'_0_gm_fh/tala/pers
+
+SögnSegjaÁfram/tala/pers →
+    'bæta:so'_0_gm_fh/tala/pers "við:ao"
+    | 'halda:so'_0_gm_fh/tala/pers "áfram:ao"
 
 AðSögn →
     # , að sögn fulltrúa lögregluyfirvalda
@@ -918,7 +936,8 @@ SamanburðarNlTenging →
 SamanburðarSem → Sem
 
 SamanburðarTengingOg →
-    ","? AðvörunSem? "og:st"                # Erfitt fjarskiptasamband er á staðnum og mikil snjóþyngsli
+    ","? "og:st"                # Erfitt fjarskiptasamband er á staðnum og mikil snjóþyngsli
+    | ","? AðvörunSemOg
 
 $score(-8) SamanburðurNl
 $score(+4) SamanburðarNlTenging
@@ -1119,8 +1138,8 @@ SetningSoSagnliður →
     | So_1_nh/fall HjSögnNhMeðSo/tala/pers NlFrumlag_nf/tala/pers/kyn
         NlBeintAndlag/fall AtvFsAuka?
 
-    # Farðu [galvaskur] að sækja kaffi strax
-    | Sögn_bh SögnFrh_bh?
+    # [Endilega] farðu [galvaskur] að sækja kaffi strax
+    | BhAtviksliður? Sögn_bh SögnFrh_bh?
 
     # Má með sanni segja (að þeir hafi sloppið með skrekkinn)
     | SagnHlutiMegiSkuli
@@ -1137,6 +1156,10 @@ SetningSoSagnliður →
 
     # Virðist sem Björn hafi fengið aðsvif
     | VirðistSem
+
+
+# Atviksorð leyfileg á undan boðháttarsetningu
+BhAtviksliður → "endilega:ao"
 
 # Hér eru setningargerðir sem byrja á sagnlið, innifela
 # falið 3p. et. frumlag og geta þar af leiðandi staðið
@@ -5368,7 +5391,7 @@ Skýringarliður →
 OgEða →
     "og:st" OgAo?
     | "eða:st" | "ellegar:st" | "eður:st"
-    | "svo:st" "og:st" | AðvörunSem "og:st" | "né:st"
+    | "svo:st" "og:st" | AðvörunSemOg | "né:st"
     | ÞarÁMeðal | 'meðal_annars:ao'
     | 'það:pfn'_hk_et_nf 'vera:so'_0_gm_fh_et_p3
     | "eins:ao" "og:st" | "líkt:ao" "og:st"
@@ -5412,7 +5435,7 @@ $score(-8) KommaOgEðaStrik
 
 Aðaltenging →
     "og:st" | "svo:st" "og:st" | "eða:st" | "ellegar:st" | "heldur:st"
-    | "eins:ao" "og:st" | "en:st" | AðvörunSem "og:st"
+    | "eins:ao" "og:st" | "en:st" | AðvörunSemOg
 
 En → "en:st"
 
@@ -7434,8 +7457,8 @@ AðvörunAð →
 $tag(error) AðvörunAð
 
 # 'sem og'
-AðvörunSem → "sem:st"
-$tag(error) AðvörunSem
+AðvörunSemOg → "sem:st" "og:st"
+$tag(error) AðvörunSemOg
 
 # 'annað hvort' í tveimur orðum en á að vera eitt
 VillaAnnaðHvort →
@@ -7497,8 +7520,14 @@ FjöldiHluti_et_kk/fall →
     | 'helmingur:kk'_et/fall
 
 $tag(error) VillaFjöldiHluti/fall/kyn
-$score(-4) VillaFjöldiHluti/fall/kyn
+$score(-99) VillaFjöldiHluti/fall/kyn
 
+Aðaltenging →
+    > VillaNé
+
+VillaNé → "né:st"
+$tag(error) VillaNé
+$score(-999) VillaNé
 
 # ----------------------------------------------
 #
@@ -7586,7 +7615,7 @@ VillaTvípunkturFs →
     fs/fall ":" Nl/fall
 
 $tag(error) VillaTvípunkturFs
-$score(+99) VillaTvípunkturFs
+$score(-999) VillaTvípunkturFs
 
 NauðsynlegKomma →
     > VillaVantarKommu
@@ -7596,12 +7625,6 @@ VillaVantarKommu → ∅
 $tag(error) VillaVantarKommu
 $score(-999) VillaVantarKommu
 
-Aðaltenging →
-    > VillaNé
-
-VillaNé → "né:st"
-$tag(error) VillaNé
-$score(-999) VillaNé
 
 # Sögn í annarri tölu en frumlag: 'Vinnuvika sjómanna eru 7 dagar'
 
