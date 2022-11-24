@@ -641,7 +641,8 @@ public:
       { return this->m_f ? (UINT)fwrite(pb, 1, nLen, this->m_f) : 0; }
 
    BOOL read_UINT(UINT& n)
-      { return this->read(&n, sizeof(UINT)) == sizeof(UINT); }
+      { return this->read(&n, sizeof(UINT)) == sizeof(UINT); } // RB: Er skráin alltaf af sömu stærð?? --> fread returns the number of full items the function read,
+                                 // which may be less than count if an error occurs, or if it encounters the end of the file before reaching count.
    BOOL read_INT(INT& i)
       { return this->read(&i, sizeof(INT)) == sizeof(INT); }
 
@@ -1125,10 +1126,12 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
    Production* p = pRootNt->getHead();  // RB: Náð í start production úr grammar
    while (p) {
       State* ps = new (pChunkHead) State(iStartNt, 0, p, 0, NULL); // RB: (NT, dot/cursor staða, production, start ix, nóða)
+                                                                  // Ath, að pChunkHead er pointer sem bendir á nákvæmlega sömu addressu en
+                                                                  // er notað í push fallinu hér á eftir til að henda terminal stöðum sem ekki matcha.
 #ifdef DEBUG
       printf("For initial state, pushing production starting with nonterminal %d\n", (INT)(*p)[0]);
 #endif
-      this->push(nHandle, ps, pCol[0], pQ0, pChunkHead); // Sett í Earley-set 0 (pCol[0]), push sér um það sem gerist í for lúppuni, þ.e. að setja í E0 eða Q'
+      this->push(nHandle, ps, pCol[0], pQ0, pChunkHead); // RB: Sett í Earley-set 0 (pCol[0]), push sér um það sem gerist í for lúppuni, þ.e. að setja í E0 eða Q'
       p = p->getNext();  // RB: Sækir annað start production ef það er til.
    }
 
@@ -1161,29 +1164,30 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
 
       pQ = pQ0; // RB: pQ0 == Q' í ritgerð
       pQ0 = NULL;
-      HNode* pH = NULL;
+      HNode* pH = NULL; // RB: H-queue í ritgerð
 
       // No nonterminals seen yet
       memset(pbSeen, 0, nNumNonterminals * sizeof(BYTE));
 
-      while (pState) {
+      while (pState) {  // RB: While R != ∅ í ritgerð byrjar
 
          INT iItem = pState->prodDot();
 
-         if (iItem < 0) {
+         if (iItem < 0) { // RB: if Λ=(B ::= α · Cβ,h,w) í ritgerð - PREDICTOR
             // Nonterminal at the dot: Earley predictor
             // Don't push the same nonterminal more than once to the same column
             if (!pbSeen[~((UINT)iItem)]) { // RB: Svona er komið í veg fyrir tvítekningar í stað þess að nota t.d. set/mengi
-                                           // https://stackoverflow.com/questions/4975340/int-to-unsigned-int-conversion
-                                           // Since the value is negative, UINT_MAX + 1 is added to it so that the value is a valid unsigned quantity.
-                                           // Ef ég skil rétt: Ef destructorinn skilar false er stöðunni bætt við Q eða Ei.
+                                           // Ath, ~ er ekki destructor heldur bitwise negation, mínustölu breytt í plús, samt ekki námkvæmlega sömu
+                                           // tölu, því þá þyrfti að draga einn frá. Hér verður því t.d. -9 að 8.
+                                           // Sjá https://cplusplus.com/forum/general/78376/
+                                           // Ef þetta skilar false er stöðunni bætt við Q eða Ei, annars ekki. 
                // Earley predictor
                // Push all right hand sides of this nonterminal
                pbSeen[~((UINT)iItem)] = 1;
-               p = (*this->m_pGrammar)[iItem]->getHead();
-               while (p) {
-                  State* psNew = new (pChunkHead) State(iItem, 0, p, i, NULL);
-                  this->push(nHandle, psNew, pEi, pQ, pChunkHead);
+               p = (*this->m_pGrammar)[iItem]->getHead(); // RB: iItem er C í ritgerð
+               while (p) {                                     // RB: for all (C ::= δ) ∈ P í ritgerð
+                  State* psNew = new (pChunkHead) State(iItem, 0, p, i, NULL); 
+                  this->push(nHandle, psNew, pEi, pQ, pChunkHead); // RB: Sett í Earley-set i (pEi), push sér um það sem gerist í for lúppuni, þ.e. að setja í Ei eða Q
                   p = p->getNext();
                }
             }
@@ -1191,9 +1195,9 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             // nonterminal iItem (nt_C)
             // NOTE: this code should NOT be within the above if(!pbSeen[...])
             HNode* ph = pH;
-            while (ph) {
+            while (ph) {  // RB: if ((C, v) ∈ H) útfært með while lúppu og if-setningunni hér fyrir neðan.
                if (ph->getNt() == iItem) {
-                  Node* pY = this->makeNode(pState, i, ph->getV(), ndV);
+                  Node* pY = this->makeNode(pState, i, ph->getV(), ndV);  // RB: makeNode og State hér fyrir neðan sjá um að færa punktinn/cursorinn.
                   State* psNew = new (pChunkHead) State(pState, pY);
                   this->push(nHandle, psNew, pEi, pQ, pChunkHead);
                }
@@ -1201,7 +1205,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             }
          }
          else
-         if (iItem == 0) {
+         if (iItem == 0) { // RB: 0 þýðir hér að ekkert sé fyrir framan cursorinn, sjá útfærslu á pState->prodDot() hér fyrir ofan.
             // Production completed: Earley completer
             INT iNtB = pState->getNt();
             UINT nStart = pState->getStart();
@@ -1373,7 +1377,7 @@ BOOL defaultMatcher(UINT nHandle, UINT nToken, UINT nTerminal)
    return nToken == nTerminal;
 }
 
-Grammar* newGrammar(const CHAR* pszGrammarFile)
+Grammar* newGrammar(const CHAR* pszGrammarFile) // RB: Kallað er í þetta fall úr FastParser, fallið _load_binary_grammar. Mállýsingunni hlaðið inn úr skrá.
 {
    if (!pszGrammarFile)
       return NULL;
