@@ -643,6 +643,7 @@ public:
    BOOL read_UINT(UINT& n)
       { return this->read(&n, sizeof(UINT)) == sizeof(UINT); } // RB: Er skráin alltaf af sömu stærð?? --> fread returns the number of full items the function read,
                                  // which may be less than count if an error occurs, or if it encounters the end of the file before reaching count.
+                                 // Ef skráin nær ekki sömu stærð og UINT þá skilar fallið false og forritið hættir vinnslu.
    BOOL read_INT(INT& i)
       { return this->read(&i, sizeof(INT)) == sizeof(INT); }
 
@@ -1210,15 +1211,16 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             INT iNtB = pState->getNt();
             UINT nStart = pState->getStart();
             Node* pW = pState->getNode();
-            if (!pW) {
+            if (!pW) {    // RB: if w = null í ritgerð.
                Label label(iNtB, 0, NULL, i, i);
                pW = ndV.lookupOrAdd(label);
-               pW->addFamily(pState->getProd(), NULL, NULL); // Epsilon production
+               pW->addFamily(pState->getProd(), NULL, NULL); // Epsilon production // RB: Tékk á því hvort fjölskyldan sé þegar til í addFamily fallinu.
             }
-            if (nStart == i) {
+            if (nStart == i) { // RB: if h = i í ritgerð
                HNode* ph = new HNode(iNtB, pW);
-               ph->setNext(pH);
-               pH = ph;
+               ph->setNext(pH); // RB: Með þessu er í raun búin til röðin H eins og kveðið er á um í ritgerðinni. Síðasta stakið bendir á null og þannig 
+                                 // stoppar while lúppan í línu 1199 í PREDICTORNUM.
+               pH = ph;          
             }
             State* psNt = pCol[nStart]->getNtHead(iNtB);
             while (psNt) {
