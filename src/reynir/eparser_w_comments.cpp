@@ -1222,8 +1222,8 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
                                  // stoppar while lúppan í línu 1199 í PREDICTORNUM.
                pH = ph;          
             }
-            State* psNt = pCol[nStart]->getNtHead(iNtB);
-            while (psNt) {
+            State* psNt = pCol[nStart]->getNtHead(iNtB); // RB: nStart er start indexinn á Earley-iteminu sem er sama og h í ritgerðinni.
+            while (psNt) {                               // Útfærsla á 'for all (A ::= τ · Dδ,k,z) in Eh' í ritgerðinni
                Node* pY = this->makeNode(psNt, i, pW, ndV);
                State* psNew = new (pChunkHead) State(psNt, pY);
                this->push(nHandle, psNew, pEi, pQ, pChunkHead);
@@ -1251,23 +1251,24 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       // Done processing this column: let it clean up
       pEi->stopParse();
 
-      if (pQ) {
-         Label label(pEi->getToken(), 0, NULL, i, i + 1);
+      if (pQ) { // RB: Frávik frá ritgerð - engin if-setning í henni.
+         Label label(pEi->getToken(), 0, NULL, i, i + 1); // RB: og aðeins flóknari label, bætast við 2 færibreytur í miðju, hér 0 og NULL (dot og production).
+                                                          // Væntanlega til að get stutt intermediari nodes.
          pV = new Node(label); // Reference is deleted below
          // Open up the next column
-         pCol[i + 1]->startParse(nHandle);
+         pCol[i + 1]->startParse(nHandle);  // RB: Skil ekki tilgang nHandle eins og er en skil að hér verið að úthluta matching cachi. Skoða námsgögn um handle aftur úr Þýðendum.
       }
 
-      while (pQ) {
+      while (pQ) { // RB: while Q != ∅ í ritgerð
          // Earley scanner
          State* psNext = pQ->getNext();
-         Node* pY = this->makeNode(pQ, i + 1, pV, ndV);
+         Node* pY = this->makeNode(pQ, i + 1, pV, ndV); // RB: j og w er sleppt sem færibreytum enda eru bæði gildin í stöðunni.
          // Instead of throwing away the old state and creating
          // a new almost identical one, re-use the old after
          // 'incrementing' it by moving the dot one step to the right
-         pQ->increment(pY);
+         pQ->increment(pY); // RB: Stöðunni sem pQ bendir á er breytt, cursor færður og hún bendir nú á nýju nóðuna pY.
          ASSERT(i + 1 <= nTokens);
-         this->push(nHandle, pQ, pCol[i + 1], pQ0, pChunkHead);
+         this->push(nHandle, pQ, pCol[i + 1], pQ0, pChunkHead); // RB: Nýja staðan er svo sett í Ei+1 og Q' eftir því sem við á.
          pQ = psNext;
       }
 
@@ -1296,14 +1297,14 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
    ASSERT(pQ0 == NULL);
 
    Node* pResult = NULL;
-   if (i > nTokens) {
+   if (i > nTokens) { // RB: Resulti skilað.
       // Completed the token loop
       pCol[nTokens]->resetEnum();
       State* ps = pCol[nTokens]->nextState();
       while (ps && !pResult) {
          // Look through the end states until we find one that spans the
          // entire parse tree and derives the starting nonterminal
-         pResult = ps->getResult(iStartNt);
+         pResult = ps->getResult(iStartNt); // RB: iStartNt er start variable úr byrun sem hefur ekkert breyst síðan þá.
          if (pResult)
             // Save the result node from being deleted when the
             // column states are deleted
