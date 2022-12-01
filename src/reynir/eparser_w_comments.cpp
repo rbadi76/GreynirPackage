@@ -607,7 +607,7 @@ BOOL Column::matches(UINT nHandle, UINT nTerminal) const
       // We already have a cached result for this terminal
       return (BOOL)(this->m_abCache[nTerminal] & 0x01);
    // Not cached: obtain a result and store it in the cache
-   BOOL b = this->m_pMatchingFunc(nHandle, this->m_nToken, nTerminal) != 0;
+   BOOL b = this->m_pMatchingFunc(nHandle, this->m_nToken, nTerminal) != 0; // RB: Hér kallað yfir í Python hlutann.
    Column::acMatches++; // Count calls to the matching function
    // Mark our cache
    this->m_abCache[nTerminal] = b ? (BYTE)0x81 : (BYTE)0x80;
