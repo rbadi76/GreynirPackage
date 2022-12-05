@@ -22,7 +22,10 @@ for sent in sents:
         print("Could not parse sentence. Error index: " + str(parsedSent.err_index))
     i += 1'''
 
-sent = g.parse_single("Umframfiskur ratar á diska fátæka fólksins")
+text1 = "Umframfiskur ratar á diska fátæka fólksins"
+text2 = "Hún réð sig til vinnu á gúmmíbáti"
+
+sent = g.parse_single(text2)
 print("Done")
 
 #print(sent.tree.view)
