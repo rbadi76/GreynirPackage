@@ -1,4 +1,4 @@
-from collections import defaultdict, OrderedDict
+'''from collections import defaultdict, OrderedDict
 
 class Person:
 
@@ -13,4 +13,9 @@ class Person:
 
 myVar = Person()
 print(myVar)
-print(myVar.properties)
+print(myVar.properties)'''
+
+from islenska import Bin
+b = Bin()
+myvar = b.lookup("vera")
+print(myvar)

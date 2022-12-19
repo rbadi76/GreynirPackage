@@ -25,8 +25,23 @@ for sent in sents:
 text1 = "Umframfiskur ratar á diska fátæka fólksins"
 text2 = "Hún réð sig til vinnu á gúmmíbáti"
 
-sent = g.parse_single(text2)
-print("Done")
+#sent = g.parse_single(text2)
+job = g.submit(text2)
+for sent in job:
+    if sent.parse():
+        print(sent.tree)
+    else:
+        print("Error at index {}".format(sent.err_index))
+num_sentences = job.num_sentences   # Total number of sentences
+num_parsed = job.num_parsed         # Thereof successfully parsed
+ambiguity = job.ambiguity           # Average ambiguity factor
+parse_time = job.parse_time         # Elapsed time since job was created
+print("Done.")
+print("Number of sentences: {}".format(num_sentences))
+print("Thereof successfully parsed: {}".format(num_parsed))
+print("Average ambiguity factor: {}".format(ambiguity))
+print("Parse time: {}".format(parse_time))
+
 
 #print(sent.tree.view)
 #print("Is it?: " + str(sent._tree.is_ambiguous))
