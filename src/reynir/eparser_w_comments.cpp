@@ -1121,7 +1121,8 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
    StateChunk* pChunkHead = NULL;
 
    // Prepare the the first column
-   pCol[0]->startParse(nHandle);
+   pCol[0]->startParse(nHandle); // RB: nHandler er pointer/reference á sjálfan parserinn sem er notaður þegar kallað er á python föllin tvö, matching_func
+                                 // og alloc_func
 
    // Prepare the initial state
    Production* p = pRootNt->getHead();  // RB: Náð í start production úr grammar
@@ -1256,7 +1257,8 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
                                                           // Væntanlega til að get stutt intermediari nodes.
          pV = new Node(label); // Reference is deleted below
          // Open up the next column
-         pCol[i + 1]->startParse(nHandle);  // RB: Skil ekki tilgang nHandle eins og er en skil að hér verið að úthluta matching cachi. Skoða námsgögn um handle aftur úr Þýðendum.
+         pCol[i + 1]->startParse(nHandle);  // RB: nHandle vísar hér í parse job, þ.e. það geta verið fleiri en ein vinnsla í gangi og því þarf þetta til að geta greint á milli
+                                            // (þ.e. concurrency og multy-threading held ég.)
       }
 
       while (pQ) { // RB: while Q != ∅ í ritgerð
