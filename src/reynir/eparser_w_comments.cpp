@@ -603,7 +603,7 @@ BOOL Column::matches(UINT nHandle, UINT nTerminal) const
       // Sentinel token in last column never matches
       return false;
    ASSERT(this->m_abCache != NULL);
-   if (this->m_abCache[nTerminal] & 0x80)
+   if (this->m_abCache[nTerminal] & 0x80) // RB: 0x80 stendur fyrir False, 0x81 stendur fyrir True
       // We already have a cached result for this terminal
       return (BOOL)(this->m_abCache[nTerminal] & 0x01);
    // Not cached: obtain a result and store it in the cache
