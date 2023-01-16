@@ -603,9 +603,9 @@ BOOL Column::matches(UINT nHandle, UINT nTerminal) const
       // Sentinel token in last column never matches
       return false;
    ASSERT(this->m_abCache != NULL);
-   if (this->m_abCache[nTerminal] & 0x80) // RB: 0x80 stendur fyrir False, 0x81 stendur fyrir True
+   if (this->m_abCache[nTerminal] & 0x80) // RB: 0x80 stendur fyrir False, 0x81 stendur fyrir True.
       // We already have a cached result for this terminal
-      return (BOOL)(this->m_abCache[nTerminal] & 0x01);
+      return (BOOL)(this->m_abCache[nTerminal] & 0x01); // RB: Skrýtið, en þetta verður auðvitað alltaf false. True value or cachi er aldrei notað.
    // Not cached: obtain a result and store it in the cache
    BOOL b = this->m_pMatchingFunc(nHandle, this->m_nToken, nTerminal) != 0; // RB: Hér kallað yfir í Python hlutann.
    Column::acMatches++; // Count calls to the matching function

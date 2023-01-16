@@ -164,15 +164,19 @@ class _ReductionScope:
         if nt:
             if nt.has_tag("enable_prep_bonus"):
                 # SagnInnskot has this tag
-                reducer.push_prep_bonus(None if verb is None else verb[:])
+                thing_to_push = None if verb is None else verb[:]
+                reducer.push_prep_bonus(thing_to_push)
+                # print("Pushed " + str(thing_to_push) + " onto prep_bonus stack when in node " + str(node))
                 self.pushed_prep_bonus = True
             elif nt.has_tag("begin_prep_scope") or nt.is_noun_phrase:
                 # Setning and SetningÁnF have this tag, and we also
                 # enter a new prep bonus scope in noun phrases
                 reducer.push_prep_bonus(None)
+                # print("Pushed None onto prep_bonus stack when in node " + str(node))
                 self.pushed_prep_bonus = True
                 verb = None
         reducer.push_current_verb(verb)
+        print("Pushed " + str(verb) + " onto current_verb stack when in node " + str(node) + ". Length: " + str(len(self.reducer._current_verb_stack)))
         self.start_verb = verb
 
     def start_family(self, ix: int, prod: Production) -> None:
@@ -252,6 +256,7 @@ class _ReductionScope:
                     # An example is Dagsetning which we like to be associated
                     # with a verb rather than a noun phrase
                     sc["sc"] += _VERB_PREP_BONUS
+                    print("Prep bonus applied to non-terminal " + str(nt) + " with value " + str(_VERB_PREP_BONUS))
 
                 if nt.has_tag("pick_up_verb"):
                     verb = sc.get("so")
@@ -270,8 +275,10 @@ class _ReductionScope:
         finally:
             # Make sure we pop everything that was pushed in __init__()
             if self.pushed_prep_bonus:
-                self.reducer.pop_prep_bonus()
-            self.reducer.pop_current_verb()
+                thing_which_was_popped = self.reducer.pop_prep_bonus()
+                # print("Popped " + str(thing_which_was_popped) + " from prep_bonus_stack when in node " + str(node))
+            thing_which_was_popped = self.reducer.pop_current_verb()
+            print("Popped current verb " + str(thing_which_was_popped) + " from current verb stack when in node " + str(node) + ". Length: " + str(len(self.reducer._current_verb_stack)))
 
 
 class ParseForestReducer:
@@ -344,8 +351,10 @@ class ParseForestReducer:
         if VerbFrame.matches_preposition(verb_with_cases, prep_with_case):
             # If the verb clicks with the given preposition in the
             # given case, give a healthy bonus
+            print("There was a match within VerbFrame between " + str(verb_with_cases) + " and " + str(prep_with_case))
             return _VERB_PREP_BONUS
         # If no match, discourage
+        print("There was no match within VerbFrame between " + str(verb_with_cases) + " and " + str(prep_with_case) + "- penalty added.")
         return _VERB_PREP_PENALTY
 
     def visit_token(self, node: Node) -> ResultDict:
@@ -358,6 +367,7 @@ class ParseForestReducer:
             # Preposition terminal - this is either a normal fs_case terminal
             # or a literal terminal such as "á:fs"
             prep_bonus = self.get_prep_bonus()
+            print("prep_bonus found when in node " + str(node) + ": " + str(prep_bonus))
             if prep_bonus is not None:
                 # We are inside a preposition bonus zone:
                 # give bonus points if this preposition terminal matches
@@ -378,8 +388,10 @@ class ParseForestReducer:
                         else:
                             # Give the highest bonus that is available
                             final_bonus = max(final_bonus, bonus)
+                            print("1 Final bonus added to terminal " + str(terminal) + " with value " + str(final_bonus))
                 if final_bonus is not None:
                     sc += final_bonus
+                    print("2 Final bonus added to terminal " + str(terminal) + " with value " + str(final_bonus))
         elif nt.matches_category("so"):  # !!! Was .startswith("so")
             # Verb terminal: pick up the verb
             d["so"] = [(nt, cast(BIN_Token, node.token))]
@@ -453,6 +465,8 @@ class ParseForestReducer:
                 # Go through each family and calculate its score
                 for family_ix, (prod, children) in enumerate(w._families):
                     scope.start_family(family_ix, prod)
+                    if(len(w._families) > 1):
+                        print("New family with index " + str(family_ix) + " in node " + str(w) + " STARTS")
                     for ch in children:
                         if ch is not None:
                             prev_key = current_key
@@ -471,6 +485,8 @@ class ParseForestReducer:
                                 current_key = 0
                             scope.add_child(family_ix, calc_score(ch))
                             current_key = prev_key
+                    if(len(w._families) > 1):
+                        print("New family with index " + str(family_ix) + " in node " + str(w) + " ENDS")
                 # Return a dict describing the winning family of children
                 # (derivation) including an "sc" field for its score.
                 # !!! TODO: We might be pruning the parse forest too

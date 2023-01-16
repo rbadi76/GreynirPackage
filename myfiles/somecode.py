@@ -23,13 +23,14 @@ for sent in sents:
     i += 1'''
 
 text1 = "Umframfiskur ratar á diska fátæka fólksins"
-text2 = "Hún réð sig til vinnu á gúmmíbáti"
+text2 = "Hún réð sig til vinnu á gúmmíbát"
 
 #sent = g.parse_single(text2)
 job = g.submit(text2)
 for sent in job:
     if sent.parse():
-        print(sent.tree)
+        #print(sent.tree)
+        print("Parsing sentence - skipping showing the whole tree.")
     else:
         print("Error at index {}".format(sent.err_index))
 num_sentences = job.num_sentences   # Total number of sentences

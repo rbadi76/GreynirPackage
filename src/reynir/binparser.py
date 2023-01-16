@@ -1463,7 +1463,8 @@ class BIN_Token(Token):
         # of this token match the terminal
         if self.t2:
             # Return the first matching meaning, or False if none
-            return terminal.matches_token_meaning(self)
+            returnValue = terminal.matches_token_meaning(self)
+            return returnValue
 
         # Unknown word, i.e. no meanings in BÍN (might be foreign, unknown name, etc.)
         if self.is_upper:
