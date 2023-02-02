@@ -48,6 +48,7 @@
 #include <stdint.h>
 #include <assert.h>
 #include <time.h>
+#include <vector>
 
 #include "eparser.h"
 
@@ -177,6 +178,9 @@ private:
    HashBin m_aHash[HASH_BINS]; // The hash bin array
    UINT m_nEnumBin; // Round robin used during enumeration of states
 
+   // Contains pointers to terminals matched with the token, null for orphaned token nodes that will be matched in the next round.
+   std::vector<UINT*> m_terminalsInColumn; 
+
    static AllocCounter ac;
    static AllocCounter acMatches;
 
@@ -202,6 +206,9 @@ public:
    State* getNtHead(INT iNt) const;
 
    BOOL matches(UINT nHandle, UINT nTerminal) const;
+
+   void pushToTerminalsVector(UINT* nTerminal);
+   bool allTokenNodesAreMatchedWithTerminal();
 
 };
 
@@ -613,6 +620,19 @@ BOOL Column::matches(UINT nHandle, UINT nTerminal) const
    return b;
 }
 
+bool Column::allTokenNodesAreMatchedWithTerminal()
+{
+   for(int i = 0; i < this->m_terminalsInColumn.size(); i++)
+   {
+      if(this->m_terminalsInColumn[i] == NULL) return false;
+   }
+   return true;
+}
+
+void Column::pushToTerminalsVector(UINT* terminal)
+{
+   this->m_terminalsInColumn.push_back(terminal);
+}
 
 class File {
 
