@@ -179,7 +179,7 @@ private:
    UINT m_nEnumBin; // Round robin used during enumeration of states
 
    // Contains pointers to terminals matched with the token, null for orphaned token nodes that will be matched in the next round.
-   std::vector<UINT*> m_terminalsInColumn; 
+   std::vector<INT*> m_terminalsInColumn; 
 
    static AllocCounter ac;
    static AllocCounter acMatches;
@@ -207,8 +207,9 @@ public:
 
    BOOL matches(UINT nHandle, UINT nTerminal) const;
 
-   void pushToTerminalsVector(UINT* nTerminal);
+   void pushToTerminalsVector(INT* nTerminal);
    bool allTokenNodesAreMatchedWithTerminal();
+   void setValueToNullPositionOfTerminalsVector(INT* nTerminal);
 
 };
 
@@ -624,15 +625,28 @@ bool Column::allTokenNodesAreMatchedWithTerminal()
 {
    for(int i = 0; i < this->m_terminalsInColumn.size(); i++)
    {
-      if(this->m_terminalsInColumn[i] == NULL) return false;
+      if(this->m_terminalsInColumn.at(i) == NULL) return false;
    }
    return true;
 }
 
-void Column::pushToTerminalsVector(UINT* terminal)
+void Column::pushToTerminalsVector(INT* terminal)
 {
    this->m_terminalsInColumn.push_back(terminal);
 }
+
+void Column::setValueToNullPositionOfTerminalsVector(INT* terminal)
+{
+   for(int i = 0; i < this->m_terminalsInColumn.size(); i++)
+   {
+      if(this->m_terminalsInColumn.at(i) == NULL)
+      {
+         this->m_terminalsInColumn.at(i) = terminal;
+         return;
+      }
+   }
+}
+
 
 class File {
 
@@ -876,7 +890,7 @@ void Node::delRef(void)
       delete this;
 }
 
-void Node::addFamily(Production* pProd, Node* pW, Node* pV)
+void Node::addFamily(Production* pProd, Node* pW, Node* pV, Column** ppColumns, UINT i, State* pState)
 {
    // pW may be NULL, or both may be NULL if epsilon
    FamilyEntry* p = this->m_pHead;
@@ -889,7 +903,32 @@ void Node::addFamily(Production* pProd, Node* pW, Node* pV)
    // Not already there: create a new entry
    p = new FamilyEntry();
    p->pProd = pProd;
-   p->p1 = pW;
+
+   // RB: Adding feature to swap out token nodes for terminal nodes.
+   UINT nDot = pState->getDot();
+   INT nProdSymbol = (*pProd)[nDot]; // RB: Get the symbol, if it was a terminal we use it
+   Label tokenLabelW = pW->getLabel();
+   INT n_childSymbolW = tokenLabelW.getSymbol();
+   if(n_childSymbolW > 0) // RB: If this is a token node then we swap it out for a terminal node and push it to the vector
+   {
+      Label labelW(nProdSymbol, nDot, NULL, tokenLabelW.getI(), tokenLabelW.getJ());
+      Node* terminalNodeW = new Node(labelW);
+      p->p1 = terminalNodeW;
+      if(ppColumns[i-1]->allTokenNodesAreMatchedWithTerminal())
+      {
+         ppColumns[i-1]->pushToTerminalsVector(&nProdSymbol);
+      }
+      else
+      {
+         ppColumns[i-1]->setValueToNullPositionOfTerminalsVector(&nProdSymbol);
+      }
+   }
+   else
+   {
+      p->p1 = pW;
+   }
+   
+   // TODO: Add smilar for next node
    p->p2 = pV;
    if (pW)
       pW->addRef();
@@ -1055,26 +1094,30 @@ void Parser::releaseCache(BYTE* abCache)
    delete [] abCache;
 }
 
-Node* Parser::makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV)
+Node* Parser::makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, Column** ppColumns, UINT i)
 {
    UINT nDot = pState->getDot() + 1;
    Production* pProd = pState->getProd();
    UINT nLen = pProd->getLength();
    if (nDot == 1 && nLen >= 2)
+      if((*pProd)[nDot - 1] > 0) // RB: Only if this was a terminal do we push to the terminals vector.
+      {
+         ppColumns[i]->pushToTerminalsVector(NULL);
+      }
       return pV;
 
    INT iNtB = pState->getNt();
    UINT nStart = pState->getStart();
    Node* pW = pState->getNode();
    Production* pProdLabel = pProd;
-   if (nDot >= nLen) {
+   if (nDot >= nLen) { // RB: if β = eps { let s = B } í ritgerð
       // Completed production: label by nonterminal only
       nDot = 0;
       pProdLabel = NULL;
    }
    Label label(iNtB, nDot, pProdLabel, nStart, nEnd);
    Node* pY = ndV.lookupOrAdd(label);
-   pY->addFamily(pProd, pW, pV); // pW may be NULL
+   pY->addFamily(pProd, pW, pV, ppColumns, i, pState); // pW may be NULL
    return pY;
 }
 
@@ -1209,7 +1252,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             HNode* ph = pH;
             while (ph) {
                if (ph->getNt() == iItem) {
-                  Node* pY = this->makeNode(pState, i, ph->getV(), ndV);
+                  Node* pY = this->makeNode(pState, i, ph->getV(), ndV, pCol, i);
                   State* psNew = new (pChunkHead) State(pState, pY);
                   this->push(nHandle, psNew, pEi, pQ, pChunkHead);
                }
@@ -1225,7 +1268,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             if (!pW) {
                Label label(iNtB, 0, NULL, i, i);
                pW = ndV.lookupOrAdd(label);
-               pW->addFamily(pState->getProd(), NULL, NULL); // Epsilon production
+               pW->addFamily(pState->getProd(), NULL, NULL, pCol, i); // Epsilon production
             }
             if (nStart == i) {
                HNode* ph = new HNode(iNtB, pW);
@@ -1234,7 +1277,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             }
             State* psNt = pCol[nStart]->getNtHead(iNtB);
             while (psNt) {
-               Node* pY = this->makeNode(psNt, i, pW, ndV);
+               Node* pY = this->makeNode(psNt, i, pW, ndV, pCol, i);
                State* psNew = new (pChunkHead) State(psNt, pY);
                this->push(nHandle, psNew, pEi, pQ, pChunkHead);
                psNt = psNt->getNtNext();
@@ -1271,7 +1314,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       while (pQ) {
          // Earley scanner
          State* psNext = pQ->getNext();
-         Node* pY = this->makeNode(pQ, i + 1, pV, ndV);
+         Node* pY = this->makeNode(pQ, i + 1, pV, ndV, pCol, i);
          // Instead of throwing away the old state and creating
          // a new almost identical one, re-use the old after
          // 'incrementing' it by moving the dot one step to the right

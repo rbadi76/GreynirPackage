@@ -256,6 +256,21 @@ public:
    BOOL operator==(const Label& other) const
       { return ::memcmp((void*)this, (void*)&other, sizeof(Label)) == 0; }
 
+   INT getSymbol()
+   {
+      return this->m_iNt;
+   }
+
+   UINT getI()
+   {
+      return this->m_nI;
+   }
+
+   UINT getJ()
+   {
+      return this->m_nJ;
+   }
+
 };
 
 
@@ -291,10 +306,15 @@ public:
       { this->m_nRefCount++; }
    void delRef(void);
 
-   void addFamily(Production*, Node* pW, Node* pV);
+   void addFamily(Production*, Node* pW, Node* pV, Column** ppColumns, UINT i, State* pState);
 
    BOOL hasLabel(const Label& label) const
       { return this->m_label == label; }
+   
+   Label getLabel()
+   {
+      return this->m_label;
+   }
 
    void dump(Grammar*);
 
@@ -330,7 +350,7 @@ private:
 
    void push(UINT nHandle, State*, Column*, State*&, StateChunk*);
 
-   Node* makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV);
+   Node* makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, Column** ppColumns, UINT i);
 
    // Internal token/terminal matching cache management
    BYTE* allocCache(UINT nHandle, UINT nToken, BOOL* pbNeedsRelease);

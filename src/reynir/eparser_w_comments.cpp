@@ -1043,7 +1043,7 @@ Node* Parser::makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV)
    UINT nDot = pState->getDot() + 1;
    Production* pProd = pState->getProd();
    UINT nLen = pProd->getLength();
-   if (nDot == 1 && nLen >= 2)
+   if (nDot == 1 && nLen >= 2)   // RB: if α = eps and β != eps { let y = v } í ritgerð
       return pV;
 
    INT iNtB = pState->getNt();
