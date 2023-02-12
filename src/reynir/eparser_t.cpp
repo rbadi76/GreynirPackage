@@ -42,7 +42,7 @@
 
 */
 
-// #define DEBUG
+#define DEBUG
 
 #include <stdio.h>
 #include <stdint.h>
@@ -890,12 +890,13 @@ void Node::delRef(void)
       delete this;
 }
 
-void Node::addFamily(Production* pProd, Node* pW, Node* pV, Column** ppColumns, UINT i, State* pState)
+void Node::addFamily(Production* pProd, Node* pW, Node* pV, Column** ppColumns, UINT i, State* pState, INT tempCounter)
 {
    // pW may be NULL, or both may be NULL if epsilon
    FamilyEntry* p = this->m_pHead;
    while (p) {
       if (p->pProd == pProd && p->p1 == pW && p->p2 == pV)
+         //if(i == 0 && tempCounter < 10000) printf("In addFamily. Same family found. Returning. %d\n", 0);
          // We already have the same family entry
          return;
       p = p->pNext;
@@ -904,31 +905,79 @@ void Node::addFamily(Production* pProd, Node* pW, Node* pV, Column** ppColumns, 
    p = new FamilyEntry();
    p->pProd = pProd;
 
+   //if(i == 0 && tempCounter < 10000) printf("In addFamily. Swap feature starts. %d\n", 0);
    // RB: Adding feature to swap out token nodes for terminal nodes.
-   UINT nDot = pState->getDot();
+   /*UINT nDot = pState->getDot();
    if(pW)
    {
-      printf("pW exists. nDot == %d\n", nDot);
+      printf("pW nDot == %d\n", nDot);
+      INT nProdSymbolW = (*pProd)[nDot-1]; // RB: Get the symbol 2nd symbo before the dot, if it was a terminal we use it
+      printf("nProdSymbolW == %d", nProdSymbolW);
+      Label tokenLabelW = pW->getLabel();
+      printf("tokenLabelW == %d", tokenLabelW.getSymbol());
+      INT nChildSymbolW = tokenLabelW.getSymbol();
+      printf("nChildSymbolW == %d", nChildSymbolW);
+      if(pW && nChildSymbolW > 0) // RB: If this is a token node then we swap it out for a terminal node and push it to the vector
+      {
+         Label labelW(nProdSymbolW, nDot-1, NULL, tokenLabelW.getI(), tokenLabelW.getJ());
+         Node* terminalNodeW = new Node(labelW);
+         p->p1 = terminalNodeW;
+         if(ppColumns[i-1]->allTokenNodesAreMatchedWithTerminal())
+         {
+            ppColumns[i-1]->pushToTerminalsVector(&nProdSymbolW);
+         }
+         else
+         {
+            ppColumns[i-1]->setValueToNullPositionOfTerminalsVector(&nProdSymbolW);
+         }
+      }
+      else
+      {
+         if(i == 0 && tempCounter < 10000) printf("if pW true, Non-terminal node. Else. %d\n", 0);
+         p->p1 = pW;
+      }
+   }
+   else // RB: If pW is null this needs to be handled here
+   {*/
+      //if(i == 0 && tempCounter < 10000) printf("if pW false, Else. %d\n", 0);
       p->p1 = pW;
-   }
-   else
+   //}
+   
+   /*if(pV)
    {
-      printf("pW does not exist. nDot == %d\n", nDot);
-      p->p1 = pW;
+      printf("pV nDot == %d\n", nDot);
+      INT nProdSymbolV = (*pProd)[nDot];
+      printf("nProdSymbolV == %d", nProdSymbolV);
+      Label tokenLabelV = pV->getLabel();
+      printf("tokenLabelV == %d", tokenLabelV.getSymbol());
+      INT nChildSymbolV = tokenLabelV.getSymbol();
+      printf("n_childSymbolV == %d", nChildSymbolV);
+      if(nChildSymbolV > 0)
+      {
+         Label labelV(nProdSymbolV, nDot, NULL, tokenLabelV.getI(), tokenLabelV.getJ());
+         Node* terminalNodeV = new Node(labelV);
+         p->p2 = terminalNodeV;
+         if(ppColumns[i]->allTokenNodesAreMatchedWithTerminal())
+         {
+            ppColumns[i]->pushToTerminalsVector(&nProdSymbolV);
+         }
+         else
+         {
+            ppColumns[i]->setValueToNullPositionOfTerminalsVector(&nProdSymbolV);
+         }
+      }
+      else
+      {
+         if(i == 0 && tempCounter < 10000) printf("if pV true, Non-terminal node. Else. %d\n", 0);
+         p->p2 = pV;
+      }
    }
-
-   if(pV)
-   {
-      printf("pV exists. nDot == %d\n", nDot);
+   else // RB: If pV is null this needs to be handled here
+   {*/
+      //if(i == 0 && tempCounter < 10000) printf("if pV false, Else. %d\n", 0);
       p->p2 = pV;
-   }
-   else
-   {
-      printf("pV does not exist. nDot == %d\n", nDot);
-      p->p2 = pV;
-   }
-   //p->p1 = pW; // ORIGINAL
-   //p->p2 = pV; // ORIGINAL
+   //}
+   
    if (pW)
       pW->addRef();
    if (pV)
@@ -1093,23 +1142,25 @@ void Parser::releaseCache(BYTE* abCache)
    delete [] abCache;
 }
 
-Node* Parser::makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, Column** ppColumns, UINT i)
+Node* Parser::makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, Column** ppColumns, UINT i, INT tempCounter)
 {
+   //if(i==0 && tempCounter < 10000) printf("In makeNode. State's non-terminal: %d\n", pState->getNt());
    UINT nDot = pState->getDot() + 1;
    Production* pProd = pState->getProd();
    UINT nLen = pProd->getLength();
    if (nDot == 1 && nLen >= 2)
-   {
-      if((*pProd)[nDot - 1] > 0) // RB: Only if this was a terminal do we push to the terminals vector.
+      //if(i==0 && tempCounter < 10000) printf("Non-terminal in state: %d\n", pState->getNt());
+      //if(i==0 && tempCounter < 10000) printf("(*pProd)[0]: %d\n", (*pProd)[0]);
+      //if(i==0 && tempCounter < 10000) printf("In makeNode, In first if - (*pProd)[nDot - 1]: %d\n", (*pProd)[nDot - 1]);
+      /*if((*pProd)[nDot - 1] > 0) // RB: Only if this was a terminal do we push to the terminals vector.
       {
-         // printf("Would push to terminals vector. (*pProd)[nDot - 1] == %d\n", (*pProd)[nDot - 1]);
-         printf("Pushed NULL to terminals vector for column %d. pProd[nDot - 1] ==  %d \n", i, (*pProd)[nDot - 1]);
+         printf("Pushed to terminals vector for column %d. pProd[nDot - 1] ==  %d \n", i, (*pProd)[nDot - 1]);
          ppColumns[i]->pushToTerminalsVector(NULL);
-      }
+      }*/
+      //if(i==0 && tempCounter < 10000) printf("Returning from makeNode with pV symbol: %d, i: %d, j: %d\n", pV->getLabel().getSymbol(), pV->getLabel().getI(), pV->getLabel().getJ());
       return pV;
-   }
-      
 
+   //printf("Do I ever get here? %d\n", 9);
    INT iNtB = pState->getNt();
    UINT nStart = pState->getStart();
    Node* pW = pState->getNode();
@@ -1121,17 +1172,21 @@ Node* Parser::makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, Column
    }
    Label label(iNtB, nDot, pProdLabel, nStart, nEnd);
    Node* pY = ndV.lookupOrAdd(label);
-   pY->addFamily(pProd, pW, pV, ppColumns, i, pState); // pW may be NULL
+   printf("Calling addFamily from makeNode. pW symbol == %d, i: %u j: %u, pV symbol: %d, i: %u, j: %u\n", pW->getLabel().getSymbol(),
+      pW->getLabel().getI(), pW->getLabel().getJ(), pV->getLabel().getSymbol(), pV->getLabel().getI(), pV->getLabel().getJ());
+   pY->addFamily(pProd, pW, pV, ppColumns, i, pState, tempCounter); // pW may be NULL
    return pY;
 }
 
-void Parser::push(UINT nHandle, State* pState, Column* pE, State*& pQ, StateChunk* pChunkHead)
+void Parser::push(UINT nHandle, State* pState, Column* pE, State*& pQ, StateChunk* pChunkHead, INT* tempEiCounter, INT* tempQCounter)
 {
    INT iItem = pState->prodDot();
    if (iItem <= 0) {
       // Nonterminal or epsilon: add state to column
       if (pE->addState(pState))
          // State did not already exist in the column: we're done
+         (*tempEiCounter)++;
+         //printf("Pushed to Ei, tempEiCounter %d\n", *tempEiCounter);
          return;
    }
    else
@@ -1140,6 +1195,8 @@ void Parser::push(UINT nHandle, State* pState, Column* pE, State*& pQ, StateChun
       // Link into list whose head is pQ
       pState->setNext(pQ);
       pQ = pState;
+      (*tempQCounter)++;
+      //printf("Pushed to Q, tempQCounter %d\n", *tempQCounter);
       return;
    }
    // We did not actually push the state; discard it
@@ -1152,6 +1209,8 @@ void Parser::push(UINT nHandle, State* pState, Column* pE, State*& pQ, StateChun
       pChunkHead->m_nIndex -= sizeof(State);
       nDiscardedStates++;
    }
+   //printf("No push, tempEiCounter %d\n", *tempEiCounter);
+   (*tempEiCounter)++;
 }
 
 Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
@@ -1189,12 +1248,16 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
 
    // Prepare the initial state
    Production* p = pRootNt->getHead();
+   INT* tempEiCounter = new INT;
+   INT* tempQCounter = new INT;
+   *tempEiCounter = 0;
+   *tempQCounter = 0;
    while (p) {
       State* ps = new (pChunkHead) State(iStartNt, 0, p, 0, NULL);
 #ifdef DEBUG
       printf("For initial state, pushing production starting with nonterminal %d\n", (INT)(*p)[0]);
 #endif
-      this->push(nHandle, ps, pCol[0], pQ0, pChunkHead);
+      this->push(nHandle, ps, pCol[0], pQ0, pChunkHead, tempEiCounter, tempQCounter);
       p = p->getNext();
    }
 
@@ -1232,6 +1295,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       // No nonterminals seen yet
       memset(pbSeen, 0, nNumNonterminals * sizeof(BYTE));
 
+      INT tempCounter = 0;
       while (pState) {
 
          INT iItem = pState->prodDot();
@@ -1244,24 +1308,32 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
                // Push all right hand sides of this nonterminal
                pbSeen[~((UINT)iItem)] = 1;
                p = (*this->m_pGrammar)[iItem]->getHead();
+               *tempEiCounter = 0;
+               *tempQCounter = 0;
                while (p) {
                   State* psNew = new (pChunkHead) State(iItem, 0, p, i, NULL);
-                  this->push(nHandle, psNew, pEi, pQ, pChunkHead);
+                  this->push(nHandle, psNew, pEi, pQ, pChunkHead, tempEiCounter, tempQCounter);
                   p = p->getNext();
                }
+               //if(*tempEiCounter + *tempQCounter > 0) printf("Predictor. Added %d items to E%d, and %d items to Q, from grammar that start with non-terminal %d\n", *tempEiCounter, i, *tempQCounter, iItem);
             }
             // Add elements from the H set that refer to the
             // nonterminal iItem (nt_C)
             // NOTE: this code should NOT be within the above if(!pbSeen[...])
             HNode* ph = pH;
+            *tempEiCounter = 0;
+            *tempQCounter = 0;
             while (ph) {
                if (ph->getNt() == iItem) {
-                  Node* pY = this->makeNode(pState, i, ph->getV(), ndV, pCol, i);
+                  //if(i < 1 && tempCounter < 10000) printf("Predictor - In while ph, Non-terminal C (iItem) == %d, v.labelSymbol == %d, i == %d, j == %d\n",
+                  //   iItem, ph->getV()->getLabel().getSymbol(), ph->getV()->getLabel().getI(), ph->getV()->getLabel().getJ());
+                  Node* pY = this->makeNode(pState, i, ph->getV(), ndV, pCol, i, tempCounter);
                   State* psNew = new (pChunkHead) State(pState, pY);
-                  this->push(nHandle, psNew, pEi, pQ, pChunkHead);
+                  this->push(nHandle, psNew, pEi, pQ, pChunkHead, tempEiCounter, tempQCounter);
                }
                ph = ph->getNext();
             }
+            //if(*tempEiCounter + *tempQCounter > 0) printf("Predictor - epsilon node handling. Added %d items to E%d, and %d items to Q, from grammar that start with non-terminal %d\n", *tempEiCounter, i, *tempQCounter, iItem);
          }
          else
          if (iItem == 0) {
@@ -1272,7 +1344,11 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             if (!pW) {
                Label label(iNtB, 0, NULL, i, i);
                pW = ndV.lookupOrAdd(label);
-               pW->addFamily(pState->getProd(), NULL, NULL, pCol, i, pState); // Epsilon production
+               /*if(i < 1 && tempCounter < 10000) 
+               {
+                  printf("In completer. No pW. Just found or made pW Now to add family. State's non-terminal:  %d\n", iNtB);
+               }*/
+               pW->addFamily(pState->getProd(), NULL, NULL, pCol, i, pState, tempCounter); // Epsilon production
             }
             if (nStart == i) {
                HNode* ph = new HNode(iNtB, pW);
@@ -1280,18 +1356,25 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
                pH = ph;
             }
             State* psNt = pCol[nStart]->getNtHead(iNtB);
+            *tempEiCounter = 0;
+            *tempQCounter = 0;
             while (psNt) {
-               Node* pY = this->makeNode(psNt, i, pW, ndV, pCol, i);
+               //if(i < 1 && tempCounter < 10000) printf("Completer looking at Eh. psNt == %d\n", psNt->getNt());
+               Node* pY = this->makeNode(psNt, i, pW, ndV, pCol, i, tempCounter);
                State* psNew = new (pChunkHead) State(psNt, pY);
-               this->push(nHandle, psNew, pEi, pQ, pChunkHead);
+               this->push(nHandle, psNew, pEi, pQ, pChunkHead, tempEiCounter, tempQCounter);
                psNt = psNt->getNtNext();
             }
+            //if(*tempEiCounter + *tempQCounter > 0) printf("Completer. Added %d items to E%d, and %d items to Q, from set E%u where cursor is in front of non-terminal %d\n", *tempEiCounter, i, *tempQCounter, nStart, iNtB);
+
          }
 
          // Move to the next item on the agenda
          // (which may have been enlarged by the previous code)
          pState = pEi->nextState();
 
+         tempCounter++;
+         //if(tempCounter < 10000) printf("Temp counter incremented. Is now: %d\n", tempCounter);
       }
 
       // Clean up the H set
@@ -1315,18 +1398,22 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
          pCol[i + 1]->startParse(nHandle);
       }
 
+      *tempEiCounter = 0;
+      *tempQCounter = 0;
       while (pQ) {
          // Earley scanner
          State* psNext = pQ->getNext();
-         Node* pY = this->makeNode(pQ, i + 1, pV, ndV, pCol, i);
+         //if(i < 1 && tempCounter < 10000) printf("Scanner pQ == %d\n", pQ);
+         Node* pY = this->makeNode(pQ, i + 1, pV, ndV, pCol, i, tempCounter);
          // Instead of throwing away the old state and creating
          // a new almost identical one, re-use the old after
          // 'incrementing' it by moving the dot one step to the right
          pQ->increment(pY);
          ASSERT(i + 1 <= nTokens);
-         this->push(nHandle, pQ, pCol[i + 1], pQ0, pChunkHead);
+         this->push(nHandle, pQ, pCol[i + 1], pQ0, pChunkHead, tempEiCounter, tempQCounter);
          pQ = psNext;
       }
+      if(*tempEiCounter + *tempQCounter > 0) printf("Scanner. Added %d items to E%d, and %d items to Q' from Q where cursor is in front of terminal %d\n", *tempEiCounter, i + 1, *tempQCounter, pEi->getToken());
 
       // Clean up reference to pV created above
       if (pV)

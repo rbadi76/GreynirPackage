@@ -29,8 +29,8 @@ text2 = "Hún réð sig til vinnu á gúmmíbát"
 job = g.submit(text2)
 for sent in job:
     if sent.parse():
-        #print(sent.tree)
-        print("Parsing sentence - skipping showing the whole tree.")
+        print(sent.tree)
+        #print("Parsing sentence - skipping showing the whole tree.")
     else:
         print("Error at index {}".format(sent.err_index))
 num_sentences = job.num_sentences   # Total number of sentences
