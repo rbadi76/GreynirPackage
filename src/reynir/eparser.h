@@ -378,6 +378,16 @@ public:
 
 };
 
+class Helper
+{
+
+public:
+
+   static void printProduction(State* pState);
+   static void printProduction(Production* pProd, INT lhs, INT nDot);
+
+};
+
 // Print a report on memory allocation
 extern "C" void printAllocationReport(void);
 
