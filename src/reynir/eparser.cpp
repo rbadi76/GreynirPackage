@@ -908,10 +908,11 @@ void Node::addFamily(Production* pProd, Node* pW, Node* pV, Column** ppColumns, 
    UINT nDot = pState->getDot();
 
    bool wasChild = false;
+   Production* pFullProduction = pState->getProd();
 
    if(pW)
    {
-      INT nProdSymbolW = (*pProd)[nDot-1]; // RB: Get the symbol before the dot, if it was a terminal we use it
+      INT nProdSymbolW = (*pFullProduction)[nDot-1]; // RB: Get the symbol before the dot, if it was a terminal we use it
       Label tokenLabelW = pW->getLabel();
       INT nChildSymbolW = tokenLabelW.getSymbol(); // nChildSymbo will only be different from nProdSymbol in the case of a token/terminal
 
@@ -946,7 +947,7 @@ void Node::addFamily(Production* pProd, Node* pW, Node* pV, Column** ppColumns, 
 
    if(pV)
    {
-      INT nProdSymbolV = (*pProd)[nDot]; // RB: Get the symbol before the dot, if it was a terminal we use it
+      INT nProdSymbolV = (*pFullProduction)[nDot]; // RB: Get the symbol before the dot, if it was a terminal we use it
       Label tokenLabelV = pV->getLabel();
       INT nChildSymbolV = tokenLabelV.getSymbol(); // nChildSymbo will only be different from nProdSymbol in the case of a token/terminal
       if(nChildSymbolV > 0)
@@ -977,7 +978,7 @@ void Node::addFamily(Production* pProd, Node* pW, Node* pV, Column** ppColumns, 
    {
       p->p2 = pV;
    }
-
+   
    if(wasChild) Helper::printProduction(pState);
 
    //p->p1 = pW; // ORIGINAL
@@ -1155,7 +1156,6 @@ Node* Parser::makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, Column
    {
       if((*pProd)[nDot - 1] > 0) // RB: Only if this was a terminal do we push to the terminals vector.
       {
-         // printf("Would push to terminals vector. (*pProd)[nDot - 1] == %d\n", (*pProd)[nDot - 1]);
          printf("Pushed NULL to terminals vector for column %d. pProd[nDot - 1] ==  %d \n", i, (*pProd)[nDot - 1]);
          Helper::printProduction(pState);
          ppColumns[i]->pushToTerminalsVector(NULL);
@@ -1170,8 +1170,7 @@ Node* Parser::makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, Column
    Production* pProdLabel = pProd;
    if (nDot >= nLen) { // RB: if β = eps { let s = B } í ritgerð
       // Completed production: label by nonterminal only
-      printf("pProdLabel set to NULL - ");
-      Helper::printProduction(pState);
+      // Helper::printProduction(pState);
       nDot = 0;
       pProdLabel = NULL;
       
@@ -1343,7 +1342,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             }
             State* psNt = pCol[nStart]->getNtHead(iNtB);
             while (psNt) {
-               printf("From completer - ");
+               // printf("From completer - ");
                Node* pY = this->makeNode(psNt, i, pW, ndV, pCol, i);
                State* psNew = new (pChunkHead) State(psNt, pY);
                this->push(nHandle, psNew, pEi, pQ, pChunkHead);
@@ -1381,7 +1380,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       while (pQ) {
          // Earley scanner
          State* psNext = pQ->getNext();
-         printf("From scanner - ");
+         // printf("From scanner - ");
          Node* pY = this->makeNode(pQ, i + 1, pV, ndV, pCol, i);
          // Instead of throwing away the old state and creating
          // a new almost identical one, re-use the old after
@@ -1602,7 +1601,6 @@ void Helper::printProduction(Production* pProd, INT lhs, INT nDot)
       vProductions.push_back((*pProd)[i]);
    }
 
-   //printf()
    printf("dot: %d, length: %d, prodVector:       %d -> ", nDot, prodLength, lhs);
    for(int i = 0; i < vProductions.size(); i++)
       printf("%d | ", vProductions[i]);
