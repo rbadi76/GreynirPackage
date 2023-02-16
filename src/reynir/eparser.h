@@ -306,7 +306,7 @@ public:
       { this->m_nRefCount++; }
    void delRef(void);
 
-   void addFamily(Production*, Node* pW, Node* pV, Column** ppColumns, UINT i, State* pState);
+   void addFamily(Production*, Node* pW, Node* pV, Column** ppColumns, UINT i, INT nSymbolV, INT nSymbolW, State* pState);
 
    BOOL hasLabel(const Label& label) const
       { return this->m_label == label; }
@@ -385,6 +385,7 @@ public:
 
    static void printProduction(State* pState);
    static void printProduction(Production* pProd, INT lhs, INT nDot);
+   static void printSets(Column** columns, INT tokenSequenceLength);
 
 };
 

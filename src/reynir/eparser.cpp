@@ -48,6 +48,7 @@
 #include <stdint.h>
 #include <assert.h>
 #include <time.h>
+#include <set>
 #include <vector>
 
 #include "eparser.h"
@@ -179,7 +180,7 @@ private:
    UINT m_nEnumBin; // Round robin used during enumeration of states
 
    // Contains pointers to terminals matched with the token, null for orphaned token nodes that will be matched in the next round.
-   std::vector<INT*> m_terminalsInColumn; 
+   std::set <INT> m_setTerminalsInColumn; 
 
    static AllocCounter ac;
    static AllocCounter acMatches;
@@ -207,10 +208,8 @@ public:
 
    BOOL matches(UINT nHandle, UINT nTerminal) const;
 
-   void pushToTerminalsVector(INT* nTerminal);
-   bool allTokenNodesAreMatchedWithTerminal();
-   void setValueToNullPositionOfTerminalsVector(INT* nTerminal);
-
+   void insertIntoTerminalsSet(INT nTerminal);
+   std::set <INT> getTerminalsSet();
 };
 
 class HNode {
@@ -621,30 +620,14 @@ BOOL Column::matches(UINT nHandle, UINT nTerminal) const
    return b;
 }
 
-bool Column::allTokenNodesAreMatchedWithTerminal()
+void Column::insertIntoTerminalsSet(INT terminal)
 {
-   for(int i = 0; i < this->m_terminalsInColumn.size(); i++)
-   {
-      if(this->m_terminalsInColumn.at(i) == NULL) return false;
-   }
-   return true;
+   this->m_setTerminalsInColumn.insert(terminal);
 }
 
-void Column::pushToTerminalsVector(INT* terminal)
+std::set <INT> Column::getTerminalsSet()
 {
-   this->m_terminalsInColumn.push_back(terminal);
-}
-
-void Column::setValueToNullPositionOfTerminalsVector(INT* terminal)
-{
-   for(int i = 0; i < this->m_terminalsInColumn.size(); i++)
-   {
-      if(this->m_terminalsInColumn.at(i) == NULL)
-      {
-         this->m_terminalsInColumn.at(i) = terminal;
-         return;
-      }
-   }
+   return this->m_setTerminalsInColumn;
 }
 
 
@@ -890,7 +873,8 @@ void Node::delRef(void)
       delete this;
 }
 
-void Node::addFamily(Production* pProd, Node* pW, Node* pV, Column** ppColumns, UINT i, State* pState)
+// TODO: Remove pState later as it is only used for debugging
+void Node::addFamily(Production* pProd, Node* pW, Node* pV, Column** ppColumns, UINT i, INT nSymbolV, INT nSymbolW, State* pState)
 {
    // pW may be NULL, or both may be NULL if epsilon
    FamilyEntry* p = this->m_pHead;
@@ -905,35 +889,21 @@ void Node::addFamily(Production* pProd, Node* pW, Node* pV, Column** ppColumns, 
    p->pProd = pProd;
 
    // RB: Adding feature to swap out token nodes for terminal nodes.
-   UINT nDot = pState->getDot();
-
-   bool wasChild = false;
-   Production* pFullProduction = pState->getProd();
+   bool wasChild = false; // TODO: Remove later, variable is just used for debugging
 
    if(pW)
    {
-      INT nProdSymbolW = (*pFullProduction)[nDot-1]; // RB: Get the symbol before the dot, if it was a terminal we use it
       Label tokenLabelW = pW->getLabel();
-      INT nChildSymbolW = tokenLabelW.getSymbol(); // nChildSymbo will only be different from nProdSymbol in the case of a token/terminal
+      INT nChildSymbolW = tokenLabelW.getSymbol(); // nChildSymbol will only be different from nProdSymbol in the case of a token/terminal
 
-      if(nChildSymbolW > 0)
+      if(nChildSymbolW >= 0) // Note that the token symbol can be 0 whereas terminal symbol would be not (unless it is an epsilon terminal)
       {
          wasChild = true;
-         Label labelW(nProdSymbolW, nDot-1, NULL, tokenLabelW.getI(), tokenLabelW.getJ());
-         //printf("Create label with symbol %d, i: %d and j: %d\n", nProdSymbolW, tokenLabelW.getI(), tokenLabelW.getJ());
+         Label labelW(nSymbolW, 0, NULL, tokenLabelW.getI(), tokenLabelW.getJ());
          Node* terminalNodeW = new Node(labelW);
          p->p1 = terminalNodeW;
-         // printf("Attached a new terminal node instead of token node for p1.\n");
-         if(ppColumns[i-1]->allTokenNodesAreMatchedWithTerminal())
-         {
-            ppColumns[i-1]->pushToTerminalsVector(&nProdSymbolW);
-            printf("Pushed symbol %d to terminals vector for column %d\n", nProdSymbolW, i-1);
-         }
-         else
-         {
-            ppColumns[i-1]->setValueToNullPositionOfTerminalsVector(&nProdSymbolW);
-            printf("Replaced null value with symbol %d to terminals vector for column %d\n", nProdSymbolW, i-1);
-         }
+         ppColumns[i-1]->insertIntoTerminalsSet(nSymbolW);
+         printf("addFamily pW - Added terminal %d to terminals set for column %d\n", nSymbolW, i-1);
       }
       else
       {
@@ -947,27 +917,16 @@ void Node::addFamily(Production* pProd, Node* pW, Node* pV, Column** ppColumns, 
 
    if(pV)
    {
-      INT nProdSymbolV = (*pFullProduction)[nDot]; // RB: Get the symbol before the dot, if it was a terminal we use it
       Label tokenLabelV = pV->getLabel();
-      INT nChildSymbolV = tokenLabelV.getSymbol(); // nChildSymbo will only be different from nProdSymbol in the case of a token/terminal
-      if(nChildSymbolV > 0)
+      INT nChildSymbolV = tokenLabelV.getSymbol(); // nChildSymbol will only be different from nProdSymbol in the case of a token/terminal
+      if(nChildSymbolV >= 0)
       {
          wasChild = true;
-         Label labelV(nProdSymbolV, nDot, NULL, tokenLabelV.getI(), tokenLabelV.getJ());
-         // printf("Create label with symbol %d, i: %d and j: %d\n", nProdSymbolV, tokenLabelV.getI(), tokenLabelV.getJ());
+         Label labelV(nSymbolV, 0, NULL, tokenLabelV.getI(), tokenLabelV.getJ());
          Node* terminalNodeV = new Node(labelV);
          p->p2 = terminalNodeV;
-         // printf("Attached a new terminal node instead of token node for p2.\n");
-         if(ppColumns[i]->allTokenNodesAreMatchedWithTerminal())
-         {
-            ppColumns[i]->pushToTerminalsVector(&nProdSymbolV);
-            printf("Pushed symbol %d to terminals vector for column %d\n", nProdSymbolV, i);
-         }
-         else
-         {
-            ppColumns[i]->setValueToNullPositionOfTerminalsVector(&nProdSymbolV);
-            printf("Replaced null value with symbol %d to terminals vector for column %d\n", nProdSymbolV, i);
-         }
+         ppColumns[i]->insertIntoTerminalsSet(nSymbolV);
+         printf("addFamily pV - Added terminal %d to terminals set for column %d\n", nSymbolV, i);
       }
       else
       {
@@ -979,10 +938,8 @@ void Node::addFamily(Production* pProd, Node* pW, Node* pV, Column** ppColumns, 
       p->p2 = pV;
    }
    
-   if(wasChild) Helper::printProduction(pState);
+   if(wasChild) Helper::printProduction(pState); // TODO: Just used for debugging - remove later, including pState parameter.
 
-   //p->p1 = pW; // ORIGINAL
-   //p->p2 = pV; // ORIGINAL
    if (pW)
       pW->addRef();
    if (pV)
@@ -1152,22 +1109,29 @@ Node* Parser::makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, Column
    UINT nDot = pState->getDot() + 1;
    Production* pProd = pState->getProd();
    UINT nLen = pProd->getLength();
+   INT temp = 0;
    if (nDot == 1 && nLen >= 2)
    {
-      if((*pProd)[nDot - 1] > 0) // RB: Only if this was a terminal do we push to the terminals vector.
-      {
-         printf("Pushed NULL to terminals vector for column %d. pProd[nDot - 1] ==  %d \n", i, (*pProd)[nDot - 1]);
-         Helper::printProduction(pState);
-         ppColumns[i]->pushToTerminalsVector(NULL);
-      }
       return pV;
    }
-      
 
    INT iNtB = pState->getNt();
    UINT nStart = pState->getStart();
    Node* pW = pState->getNode();
    Production* pProdLabel = pProd;
+
+   INT nSymbolV = NULL;
+   if(pV)
+   {
+      nSymbolV = (*pProd)[nDot - 1];
+   }
+
+   INT nSymbolW = NULL;
+   if(pW)
+   {
+      nSymbolW = (*pProd)[nDot - 2];
+   }
+
    if (nDot >= nLen) { // RB: if β = eps { let s = B } í ritgerð
       // Completed production: label by nonterminal only
       // Helper::printProduction(pState);
@@ -1177,7 +1141,7 @@ Node* Parser::makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, Column
    }
    Label label(iNtB, nDot, pProdLabel, nStart, nEnd);
    Node* pY = ndV.lookupOrAdd(label);
-   pY->addFamily(pProd, pW, pV, ppColumns, i, pState); // pW may be NULL
+   pY->addFamily(pProd, pW, pV, ppColumns, i, nSymbolV, nSymbolW, pState); // pW may be NULL
    return pY;
 }
 
@@ -1333,7 +1297,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             if (!pW) {
                Label label(iNtB, 0, NULL, i, i);
                pW = ndV.lookupOrAdd(label);
-               pW->addFamily(pState->getProd(), NULL, NULL, pCol, i, pState); // Epsilon production
+               pW->addFamily(pState->getProd(), NULL, NULL, pCol, i, NULL, NULL, pState); // Epsilon production
             }
             if (nStart == i) {
                HNode* ph = new HNode(iNtB, pW);
@@ -1396,6 +1360,8 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
          pV->delRef();
       
       printf("Parser finished round %d\n", i);
+
+   if(i == nTokens) Helper::printSets(pCol, i);
 
 #ifdef DEBUG
       clock_t clockNow = clock();
@@ -1607,4 +1573,18 @@ void Helper::printProduction(Production* pProd, INT lhs, INT nDot)
    printf("\n");
 }
 
-
+void Helper::printSets(Column** cols, INT tokenSequenceLength)
+{
+   for(int i=0; i <= tokenSequenceLength; i++)
+   {
+      Column* col = cols[i];
+      std::set <INT> terminalsSet = (*col).getTerminalsSet();
+      printf("Set %d\n", i);
+      for (std::set<INT>::iterator j = terminalsSet.begin(); j != terminalsSet.end(); j++)
+      {
+         INT element = *j;
+         printf("%d ", element);
+      }
+      printf("\n");
+   }
+}
