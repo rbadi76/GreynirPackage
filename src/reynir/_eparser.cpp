@@ -7,11 +7,50 @@
    we can learn about Py_DEBUG from pyconfig.h, but it is unclear if
    the same works for the other two macros.  Py_DEBUG implies them,
    but not the other way around.
+
+   The implementation is messy (issue #350): on Windows, with _MSC_VER,
+   we have to define Py_LIMITED_API even before including pyconfig.h.
+   In that case, we guess what pyconfig.h will do to the macros above,
+   and check our guess after the #include.
+
+   Note that on Windows, with CPython 3.x, you need >= 3.5 and virtualenv
+   version >= 16.0.0.  With older versions of either, you don't get a
+   copy of PYTHON3.DLL in the virtualenv.  We can't check the version of
+   CPython *before* we even include pyconfig.h.  ffi.set_source() puts
+   a ``#define _CFFI_NO_LIMITED_API'' at the start of this file if it is
+   running on Windows < 3.5, as an attempt at fixing it, but that's
+   arguably wrong because it may not be the target version of Python.
+   Still better than nothing I guess.  As another workaround, you can
+   remove the definition of Py_LIMITED_API here.
+
+   See also 'py_limited_api' in cffi/setuptools_ext.py.
 */
-#ifndef _CFFI_USE_EMBEDDING
-#  include <pyconfig.h>
-#  if !defined(Py_DEBUG) && !defined(Py_TRACE_REFS) && !defined(Py_REF_DEBUG)
-#    define Py_LIMITED_API
+#if !defined(_CFFI_USE_EMBEDDING) && !defined(Py_LIMITED_API)
+#  ifdef _MSC_VER
+#    if !defined(_DEBUG) && !defined(Py_DEBUG) && !defined(Py_TRACE_REFS) && !defined(Py_REF_DEBUG) && !defined(_CFFI_NO_LIMITED_API)
+#      define Py_LIMITED_API
+#    endif
+#    include <pyconfig.h>
+     /* sanity-check: Py_LIMITED_API will cause crashes if any of these
+        are also defined.  Normally, the Python file PC/pyconfig.h does not
+        cause any of these to be defined, with the exception that _DEBUG
+        causes Py_DEBUG.  Double-check that. */
+#    ifdef Py_LIMITED_API
+#      if defined(Py_DEBUG)
+#        error "pyconfig.h unexpectedly defines Py_DEBUG, but Py_LIMITED_API is set"
+#      endif
+#      if defined(Py_TRACE_REFS)
+#        error "pyconfig.h unexpectedly defines Py_TRACE_REFS, but Py_LIMITED_API is set"
+#      endif
+#      if defined(Py_REF_DEBUG)
+#        error "pyconfig.h unexpectedly defines Py_REF_DEBUG, but Py_LIMITED_API is set"
+#      endif
+#    endif
+#  else
+#    include <pyconfig.h>
+#    if !defined(Py_DEBUG) && !defined(Py_TRACE_REFS) && !defined(Py_REF_DEBUG) && !defined(_CFFI_NO_LIMITED_API)
+#      define Py_LIMITED_API
+#    endif
 #  endif
 #endif
 
@@ -101,8 +140,12 @@ typedef void *_cffi_opcode_t;
 #define _CFFI_PRIM_UINT_FAST64  45
 #define _CFFI_PRIM_INTMAX       46
 #define _CFFI_PRIM_UINTMAX      47
+#define _CFFI_PRIM_FLOATCOMPLEX 48
+#define _CFFI_PRIM_DOUBLECOMPLEX 49
+#define _CFFI_PRIM_CHAR16       50
+#define _CFFI_PRIM_CHAR32       51
 
-#define _CFFI__NUM_PRIM         48
+#define _CFFI__NUM_PRIM         52
 #define _CFFI__UNKNOWN_PRIM           (-1)
 #define _CFFI__UNKNOWN_FLOAT_PRIM     (-2)
 #define _CFFI__UNKNOWN_LONG_DOUBLE    (-3)
@@ -271,6 +314,7 @@ static int search_in_struct_unions(const struct _cffi_type_context_s *ctx,
 #define _cffi_from_c_ulong PyLong_FromUnsignedLong
 #define _cffi_from_c_longlong PyLong_FromLongLong
 #define _cffi_from_c_ulonglong PyLong_FromUnsignedLongLong
+#define _cffi_from_c__Bool PyBool_FromLong
 
 #define _cffi_to_c_double PyFloat_AsDouble
 #define _cffi_to_c_float PyFloat_AsDouble
@@ -335,9 +379,9 @@ static int search_in_struct_unions(const struct _cffi_type_context_s *ctx,
 #define _cffi_from_c_struct                                              \
     ((PyObject *(*)(char *, struct _cffi_ctypedescr *))_cffi_exports[18])
 #define _cffi_to_c_wchar_t                                               \
-    ((wchar_t(*)(PyObject *))_cffi_exports[19])
+    ((_cffi_wchar_t(*)(PyObject *))_cffi_exports[19])
 #define _cffi_from_c_wchar_t                                             \
-    ((PyObject *(*)(wchar_t))_cffi_exports[20])
+    ((PyObject *(*)(_cffi_wchar_t))_cffi_exports[20])
 #define _cffi_to_c_long_double                                           \
     ((long double(*)(PyObject *))_cffi_exports[21])
 #define _cffi_to_c__Bool                                                 \
@@ -350,7 +394,11 @@ static int search_in_struct_unions(const struct _cffi_type_context_s *ctx,
 #define _CFFI_CPIDX  25
 #define _cffi_call_python                                                \
     ((void(*)(struct _cffi_externpy_s *, char *))_cffi_exports[_CFFI_CPIDX])
-#define _CFFI_NUM_EXPORTS 26
+#define _cffi_to_c_wchar3216_t                                           \
+    ((int(*)(PyObject *))_cffi_exports[26])
+#define _cffi_from_c_wchar3216_t                                         \
+    ((PyObject *(*)(int))_cffi_exports[27])
+#define _CFFI_NUM_EXPORTS 28
 
 struct _cffi_ctypedescr;
 
@@ -389,6 +437,94 @@ static PyObject *_cffi_init(const char *module_name, Py_ssize_t version,
   failure:
     Py_XDECREF(module);
     return NULL;
+}
+
+
+#ifdef HAVE_WCHAR_H
+typedef wchar_t _cffi_wchar_t;
+#else
+typedef uint16_t _cffi_wchar_t;   /* same random pick as _cffi_backend.c */
+#endif
+
+_CFFI_UNUSED_FN static uint16_t _cffi_to_c_char16_t(PyObject *o)
+{
+    if (sizeof(_cffi_wchar_t) == 2)
+        return (uint16_t)_cffi_to_c_wchar_t(o);
+    else
+        return (uint16_t)_cffi_to_c_wchar3216_t(o);
+}
+
+_CFFI_UNUSED_FN static PyObject *_cffi_from_c_char16_t(uint16_t x)
+{
+    if (sizeof(_cffi_wchar_t) == 2)
+        return _cffi_from_c_wchar_t((_cffi_wchar_t)x);
+    else
+        return _cffi_from_c_wchar3216_t((int)x);
+}
+
+_CFFI_UNUSED_FN static int _cffi_to_c_char32_t(PyObject *o)
+{
+    if (sizeof(_cffi_wchar_t) == 4)
+        return (int)_cffi_to_c_wchar_t(o);
+    else
+        return (int)_cffi_to_c_wchar3216_t(o);
+}
+
+_CFFI_UNUSED_FN static PyObject *_cffi_from_c_char32_t(unsigned int x)
+{
+    if (sizeof(_cffi_wchar_t) == 4)
+        return _cffi_from_c_wchar_t((_cffi_wchar_t)x);
+    else
+        return _cffi_from_c_wchar3216_t((int)x);
+}
+
+union _cffi_union_alignment_u {
+    unsigned char m_char;
+    unsigned short m_short;
+    unsigned int m_int;
+    unsigned long m_long;
+    unsigned long long m_longlong;
+    float m_float;
+    double m_double;
+    long double m_longdouble;
+};
+
+struct _cffi_freeme_s {
+    struct _cffi_freeme_s *next;
+    union _cffi_union_alignment_u alignment;
+};
+
+_CFFI_UNUSED_FN static int
+_cffi_convert_array_argument(struct _cffi_ctypedescr *ctptr, PyObject *arg,
+                             char **output_data, Py_ssize_t datasize,
+                             struct _cffi_freeme_s **freeme)
+{
+    char *p;
+    if (datasize < 0)
+        return -1;
+
+    p = *output_data;
+    if (p == NULL) {
+        struct _cffi_freeme_s *fp = (struct _cffi_freeme_s *)PyObject_Malloc(
+            offsetof(struct _cffi_freeme_s, alignment) + (size_t)datasize);
+        if (fp == NULL)
+            return -1;
+        fp->next = *freeme;
+        *freeme = fp;
+        p = *output_data = (char *)&fp->alignment;
+    }
+    memset((void *)p, 0, (size_t)datasize);
+    return _cffi_convert_array_from_object(p, ctptr, arg);
+}
+
+_CFFI_UNUSED_FN static void
+_cffi_free_array_arguments(struct _cffi_freeme_s *freeme)
+{
+    do {
+        void *p = (void *)freeme;
+        freeme = freeme->next;
+        PyObject_Free(p);
+    } while (freeme != NULL);
 }
 
 /**********  end CPython-specific section  **********/
@@ -475,15 +611,18 @@ extern "C" {
         struct Label label;
         struct FamilyEntry* pHead;
         UINT nRefCount;
-    } Node;
+        UINT nScore;
+        INT test;
+    };
 
     typedef BOOL (*MatchingFunc)(UINT nHandle, UINT nToken, UINT nTerminal);
     typedef BYTE* (*AllocFunc)(UINT nHandle, UINT nToken, UINT nSize);
+    typedef BOOL (*TestValueStorage)(UINT nHandle, UINT nColumnNumber, UINT nTerminalValue);
 
     struct Node* earleyParse(struct Parser*, UINT nTokens, INT iRoot, UINT nHandle, UINT* pnErrorToken);
     struct Grammar* newGrammar(const CHAR* pszGrammarFile);
     void deleteGrammar(struct Grammar*);
-    struct Parser* newParser(struct Grammar*, MatchingFunc fpMatcher, AllocFunc fpAlloc);
+    struct Parser* newParser(struct Grammar*, MatchingFunc fpMatcher, AllocFunc fpAlloc, TestValueStorage fpTestValueStorage);
     void deleteParser(struct Parser*);
     void deleteForest(struct Node*);
     void dumpForest(struct Node*, struct Grammar*);
@@ -498,63 +637,110 @@ extern "C" {
 /************************************************************/
 
 static void *_cffi_types[] = {
-/*  0 */ _CFFI_OP(_CFFI_OP_FUNCTION, 11), // int()(unsigned int, unsigned int, unsigned int)
+/*  0 */ _CFFI_OP(_CFFI_OP_FUNCTION, 15), // int()(unsigned int, unsigned int)
 /*  1 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 8), // unsigned int
 /*  2 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 8),
-/*  3 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 8),
-/*  4 */ _CFFI_OP(_CFFI_OP_FUNCTION_END, 0),
-/*  5 */ _CFFI_OP(_CFFI_OP_FUNCTION, 16), // struct Grammar *()(char const *)
-/*  6 */ _CFFI_OP(_CFFI_OP_POINTER, 43), // char const *
-/*  7 */ _CFFI_OP(_CFFI_OP_FUNCTION_END, 0),
-/*  8 */ _CFFI_OP(_CFFI_OP_FUNCTION, 26), // struct Node *()(struct Parser *, unsigned int, int, unsigned int, unsigned int *)
-/*  9 */ _CFFI_OP(_CFFI_OP_POINTER, 50), // struct Parser *
-/* 10 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 8),
-/* 11 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 7), // int
-/* 12 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 8),
-/* 13 */ _CFFI_OP(_CFFI_OP_POINTER, 1), // unsigned int *
-/* 14 */ _CFFI_OP(_CFFI_OP_FUNCTION_END, 0),
-/* 15 */ _CFFI_OP(_CFFI_OP_FUNCTION, 9), // struct Parser *()(struct Grammar *, int(*)(unsigned int, unsigned int, unsigned int), unsigned char *(*)(unsigned int, unsigned int, unsigned int))
-/* 16 */ _CFFI_OP(_CFFI_OP_POINTER, 47), // struct Grammar *
-/* 17 */ _CFFI_OP(_CFFI_OP_POINTER, 0), // int(*)(unsigned int, unsigned int, unsigned int)
-/* 18 */ _CFFI_OP(_CFFI_OP_POINTER, 20), // unsigned char *(*)(unsigned int, unsigned int, unsigned int)
-/* 19 */ _CFFI_OP(_CFFI_OP_FUNCTION_END, 0),
-/* 20 */ _CFFI_OP(_CFFI_OP_FUNCTION, 53), // unsigned char *()(unsigned int, unsigned int, unsigned int)
-/* 21 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 8),
-/* 22 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 8),
-/* 23 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 8),
+/*  3 */ _CFFI_OP(_CFFI_OP_FUNCTION_END, 0),
+/*  4 */ _CFFI_OP(_CFFI_OP_FUNCTION, 15), // int()(unsigned int, unsigned int, unsigned int)
+/*  5 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 8),
+/*  6 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 8),
+/*  7 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 8),
+/*  8 */ _CFFI_OP(_CFFI_OP_FUNCTION_END, 0),
+/*  9 */ _CFFI_OP(_CFFI_OP_FUNCTION, 20), // struct Grammar *()(char const *)
+/* 10 */ _CFFI_OP(_CFFI_OP_POINTER, 48), // char const *
+/* 11 */ _CFFI_OP(_CFFI_OP_FUNCTION_END, 0),
+/* 12 */ _CFFI_OP(_CFFI_OP_FUNCTION, 31), // struct Node *()(struct Parser *, unsigned int, int, unsigned int, unsigned int *)
+/* 13 */ _CFFI_OP(_CFFI_OP_POINTER, 56), // struct Parser *
+/* 14 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 8),
+/* 15 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 7), // int
+/* 16 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 8),
+/* 17 */ _CFFI_OP(_CFFI_OP_POINTER, 1), // unsigned int *
+/* 18 */ _CFFI_OP(_CFFI_OP_FUNCTION_END, 0),
+/* 19 */ _CFFI_OP(_CFFI_OP_FUNCTION, 13), // struct Parser *()(struct Grammar *, int(*)(unsigned int, unsigned int, unsigned int), unsigned char *(*)(unsigned int, unsigned int, unsigned int), int(*)(unsigned int, unsigned int, unsigned int))
+/* 20 */ _CFFI_OP(_CFFI_OP_POINTER, 53), // struct Grammar *
+/* 21 */ _CFFI_OP(_CFFI_OP_POINTER, 4), // int(*)(unsigned int, unsigned int, unsigned int)
+/* 22 */ _CFFI_OP(_CFFI_OP_POINTER, 25), // unsigned char *(*)(unsigned int, unsigned int, unsigned int)
+/* 23 */ _CFFI_OP(_CFFI_OP_NOOP, 21),
 /* 24 */ _CFFI_OP(_CFFI_OP_FUNCTION_END, 0),
-/* 25 */ _CFFI_OP(_CFFI_OP_FUNCTION, 1), // unsigned int()(struct Node *)
-/* 26 */ _CFFI_OP(_CFFI_OP_POINTER, 49), // struct Node *
-/* 27 */ _CFFI_OP(_CFFI_OP_FUNCTION_END, 0),
-/* 28 */ _CFFI_OP(_CFFI_OP_FUNCTION, 55), // void()(struct Grammar *)
-/* 29 */ _CFFI_OP(_CFFI_OP_NOOP, 16),
-/* 30 */ _CFFI_OP(_CFFI_OP_FUNCTION_END, 0),
-/* 31 */ _CFFI_OP(_CFFI_OP_FUNCTION, 55), // void()(struct Node *)
-/* 32 */ _CFFI_OP(_CFFI_OP_NOOP, 26),
-/* 33 */ _CFFI_OP(_CFFI_OP_FUNCTION_END, 0),
-/* 34 */ _CFFI_OP(_CFFI_OP_FUNCTION, 55), // void()(struct Node *, struct Grammar *)
-/* 35 */ _CFFI_OP(_CFFI_OP_NOOP, 26),
-/* 36 */ _CFFI_OP(_CFFI_OP_NOOP, 16),
-/* 37 */ _CFFI_OP(_CFFI_OP_FUNCTION_END, 0),
-/* 38 */ _CFFI_OP(_CFFI_OP_FUNCTION, 55), // void()(struct Parser *)
-/* 39 */ _CFFI_OP(_CFFI_OP_NOOP, 9),
-/* 40 */ _CFFI_OP(_CFFI_OP_FUNCTION_END, 0),
-/* 41 */ _CFFI_OP(_CFFI_OP_FUNCTION, 55), // void()(void)
+/* 25 */ _CFFI_OP(_CFFI_OP_FUNCTION, 59), // unsigned char *()(unsigned int, unsigned int, unsigned int)
+/* 26 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 8),
+/* 27 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 8),
+/* 28 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 8),
+/* 29 */ _CFFI_OP(_CFFI_OP_FUNCTION_END, 0),
+/* 30 */ _CFFI_OP(_CFFI_OP_FUNCTION, 1), // unsigned int()(struct Node *)
+/* 31 */ _CFFI_OP(_CFFI_OP_POINTER, 55), // struct Node *
+/* 32 */ _CFFI_OP(_CFFI_OP_FUNCTION_END, 0),
+/* 33 */ _CFFI_OP(_CFFI_OP_FUNCTION, 61), // void()(struct Grammar *)
+/* 34 */ _CFFI_OP(_CFFI_OP_NOOP, 20),
+/* 35 */ _CFFI_OP(_CFFI_OP_FUNCTION_END, 0),
+/* 36 */ _CFFI_OP(_CFFI_OP_FUNCTION, 61), // void()(struct Node *)
+/* 37 */ _CFFI_OP(_CFFI_OP_NOOP, 31),
+/* 38 */ _CFFI_OP(_CFFI_OP_FUNCTION_END, 0),
+/* 39 */ _CFFI_OP(_CFFI_OP_FUNCTION, 61), // void()(struct Node *, struct Grammar *)
+/* 40 */ _CFFI_OP(_CFFI_OP_NOOP, 31),
+/* 41 */ _CFFI_OP(_CFFI_OP_NOOP, 20),
 /* 42 */ _CFFI_OP(_CFFI_OP_FUNCTION_END, 0),
-/* 43 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 2), // char
-/* 44 */ _CFFI_OP(_CFFI_OP_POINTER, 11), // int *
-/* 45 */ _CFFI_OP(_CFFI_OP_POINTER, 46), // struct FamilyEntry *
-/* 46 */ _CFFI_OP(_CFFI_OP_STRUCT_UNION, 0), // struct FamilyEntry
-/* 47 */ _CFFI_OP(_CFFI_OP_STRUCT_UNION, 1), // struct Grammar
-/* 48 */ _CFFI_OP(_CFFI_OP_STRUCT_UNION, 2), // struct Label
-/* 49 */ _CFFI_OP(_CFFI_OP_STRUCT_UNION, 3), // struct Node
-/* 50 */ _CFFI_OP(_CFFI_OP_STRUCT_UNION, 4), // struct Parser
-/* 51 */ _CFFI_OP(_CFFI_OP_POINTER, 52), // struct Production *
-/* 52 */ _CFFI_OP(_CFFI_OP_STRUCT_UNION, 5), // struct Production
-/* 53 */ _CFFI_OP(_CFFI_OP_POINTER, 54), // unsigned char *
-/* 54 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 4), // unsigned char
-/* 55 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 0), // void
+/* 43 */ _CFFI_OP(_CFFI_OP_FUNCTION, 61), // void()(struct Parser *)
+/* 44 */ _CFFI_OP(_CFFI_OP_NOOP, 13),
+/* 45 */ _CFFI_OP(_CFFI_OP_FUNCTION_END, 0),
+/* 46 */ _CFFI_OP(_CFFI_OP_FUNCTION, 61), // void()(void)
+/* 47 */ _CFFI_OP(_CFFI_OP_FUNCTION_END, 0),
+/* 48 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 2), // char
+/* 49 */ _CFFI_OP(_CFFI_OP_POINTER, 15), // int *
+/* 50 */ _CFFI_OP(_CFFI_OP_POINTER, 0), // int(*)(unsigned int, unsigned int)
+/* 51 */ _CFFI_OP(_CFFI_OP_POINTER, 52), // struct FamilyEntry *
+/* 52 */ _CFFI_OP(_CFFI_OP_STRUCT_UNION, 0), // struct FamilyEntry
+/* 53 */ _CFFI_OP(_CFFI_OP_STRUCT_UNION, 1), // struct Grammar
+/* 54 */ _CFFI_OP(_CFFI_OP_STRUCT_UNION, 2), // struct Label
+/* 55 */ _CFFI_OP(_CFFI_OP_STRUCT_UNION, 3), // struct Node
+/* 56 */ _CFFI_OP(_CFFI_OP_STRUCT_UNION, 4), // struct Parser
+/* 57 */ _CFFI_OP(_CFFI_OP_POINTER, 58), // struct Production *
+/* 58 */ _CFFI_OP(_CFFI_OP_STRUCT_UNION, 5), // struct Production
+/* 59 */ _CFFI_OP(_CFFI_OP_POINTER, 60), // unsigned char *
+/* 60 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 4), // unsigned char
+/* 61 */ _CFFI_OP(_CFFI_OP_PRIMITIVE, 0), // void
 };
+
+static struct _cffi_externpy_s _cffi_externpy__alloc_func =
+  { "reynir._eparser.alloc_func", (int)sizeof(unsigned char *), 0, 0 };
+
+static unsigned char * alloc_func(unsigned int a0, unsigned int a1, unsigned int a2)
+{
+  char a[24];
+  char *p = a;
+  *(unsigned int *)(p + 0) = a0;
+  *(unsigned int *)(p + 8) = a1;
+  *(unsigned int *)(p + 16) = a2;
+  _cffi_call_python(&_cffi_externpy__alloc_func, p);
+  return *(unsigned char * *)p;
+}
+
+static struct _cffi_externpy_s _cffi_externpy__matching_func =
+  { "reynir._eparser.matching_func", (int)sizeof(int), 0, 0 };
+
+static int matching_func(unsigned int a0, unsigned int a1, unsigned int a2)
+{
+  char a[24];
+  char *p = a;
+  *(unsigned int *)(p + 0) = a0;
+  *(unsigned int *)(p + 8) = a1;
+  *(unsigned int *)(p + 16) = a2;
+  _cffi_call_python(&_cffi_externpy__matching_func, p);
+  return *(int *)p;
+}
+
+static struct _cffi_externpy_s _cffi_externpy__test_value_storage =
+  { "reynir._eparser.test_value_storage", (int)sizeof(int), 0, 0 };
+
+static int test_value_storage(unsigned int a0, unsigned int a1)
+{
+  char a[16];
+  char *p = a;
+  *(unsigned int *)(p + 0) = a0;
+  *(unsigned int *)(p + 8) = a1;
+  _cffi_call_python(&_cffi_externpy__test_value_storage, p);
+  return *(int *)p;
+}
 
 static void _cffi_d_deleteForest(struct Node * x0)
 {
@@ -566,15 +752,14 @@ _cffi_f_deleteForest(PyObject *self, PyObject *arg0)
 {
   struct Node * x0;
   Py_ssize_t datasize;
+  struct _cffi_freeme_s *large_args_free = NULL;
 
   datasize = _cffi_prepare_pointer_call_argument(
-      _cffi_type(26), arg0, (char **)&x0);
+      _cffi_type(31), arg0, (char **)&x0);
   if (datasize != 0) {
-    if (datasize < 0)
-      return NULL;
-    x0 = (struct Node *)alloca((size_t)datasize);
-    memset((void *)x0, 0, (size_t)datasize);
-    if (_cffi_convert_array_from_object((char *)x0, _cffi_type(26), arg0) < 0)
+    x0 = ((size_t)datasize) <= 640 ? (struct Node *)alloca((size_t)datasize) : NULL;
+    if (_cffi_convert_array_argument(_cffi_type(31), arg0, (char **)&x0,
+            datasize, &large_args_free) < 0)
       return NULL;
   }
 
@@ -585,6 +770,7 @@ _cffi_f_deleteForest(PyObject *self, PyObject *arg0)
   Py_END_ALLOW_THREADS
 
   (void)self; /* unused */
+  if (large_args_free != NULL) _cffi_free_array_arguments(large_args_free);
   Py_INCREF(Py_None);
   return Py_None;
 }
@@ -602,15 +788,14 @@ _cffi_f_deleteGrammar(PyObject *self, PyObject *arg0)
 {
   struct Grammar * x0;
   Py_ssize_t datasize;
+  struct _cffi_freeme_s *large_args_free = NULL;
 
   datasize = _cffi_prepare_pointer_call_argument(
-      _cffi_type(16), arg0, (char **)&x0);
+      _cffi_type(20), arg0, (char **)&x0);
   if (datasize != 0) {
-    if (datasize < 0)
-      return NULL;
-    x0 = (struct Grammar *)alloca((size_t)datasize);
-    memset((void *)x0, 0, (size_t)datasize);
-    if (_cffi_convert_array_from_object((char *)x0, _cffi_type(16), arg0) < 0)
+    x0 = ((size_t)datasize) <= 640 ? (struct Grammar *)alloca((size_t)datasize) : NULL;
+    if (_cffi_convert_array_argument(_cffi_type(20), arg0, (char **)&x0,
+            datasize, &large_args_free) < 0)
       return NULL;
   }
 
@@ -621,6 +806,7 @@ _cffi_f_deleteGrammar(PyObject *self, PyObject *arg0)
   Py_END_ALLOW_THREADS
 
   (void)self; /* unused */
+  if (large_args_free != NULL) _cffi_free_array_arguments(large_args_free);
   Py_INCREF(Py_None);
   return Py_None;
 }
@@ -638,15 +824,14 @@ _cffi_f_deleteParser(PyObject *self, PyObject *arg0)
 {
   struct Parser * x0;
   Py_ssize_t datasize;
+  struct _cffi_freeme_s *large_args_free = NULL;
 
   datasize = _cffi_prepare_pointer_call_argument(
-      _cffi_type(9), arg0, (char **)&x0);
+      _cffi_type(13), arg0, (char **)&x0);
   if (datasize != 0) {
-    if (datasize < 0)
-      return NULL;
-    x0 = (struct Parser *)alloca((size_t)datasize);
-    memset((void *)x0, 0, (size_t)datasize);
-    if (_cffi_convert_array_from_object((char *)x0, _cffi_type(9), arg0) < 0)
+    x0 = ((size_t)datasize) <= 640 ? (struct Parser *)alloca((size_t)datasize) : NULL;
+    if (_cffi_convert_array_argument(_cffi_type(13), arg0, (char **)&x0,
+            datasize, &large_args_free) < 0)
       return NULL;
   }
 
@@ -657,6 +842,7 @@ _cffi_f_deleteParser(PyObject *self, PyObject *arg0)
   Py_END_ALLOW_THREADS
 
   (void)self; /* unused */
+  if (large_args_free != NULL) _cffi_free_array_arguments(large_args_free);
   Py_INCREF(Py_None);
   return Py_None;
 }
@@ -675,6 +861,7 @@ _cffi_f_dumpForest(PyObject *self, PyObject *args)
   struct Node * x0;
   struct Grammar * x1;
   Py_ssize_t datasize;
+  struct _cffi_freeme_s *large_args_free = NULL;
   PyObject *arg0;
   PyObject *arg1;
 
@@ -682,24 +869,20 @@ _cffi_f_dumpForest(PyObject *self, PyObject *args)
     return NULL;
 
   datasize = _cffi_prepare_pointer_call_argument(
-      _cffi_type(26), arg0, (char **)&x0);
+      _cffi_type(31), arg0, (char **)&x0);
   if (datasize != 0) {
-    if (datasize < 0)
-      return NULL;
-    x0 = (struct Node *)alloca((size_t)datasize);
-    memset((void *)x0, 0, (size_t)datasize);
-    if (_cffi_convert_array_from_object((char *)x0, _cffi_type(26), arg0) < 0)
+    x0 = ((size_t)datasize) <= 640 ? (struct Node *)alloca((size_t)datasize) : NULL;
+    if (_cffi_convert_array_argument(_cffi_type(31), arg0, (char **)&x0,
+            datasize, &large_args_free) < 0)
       return NULL;
   }
 
   datasize = _cffi_prepare_pointer_call_argument(
-      _cffi_type(16), arg1, (char **)&x1);
+      _cffi_type(20), arg1, (char **)&x1);
   if (datasize != 0) {
-    if (datasize < 0)
-      return NULL;
-    x1 = (struct Grammar *)alloca((size_t)datasize);
-    memset((void *)x1, 0, (size_t)datasize);
-    if (_cffi_convert_array_from_object((char *)x1, _cffi_type(16), arg1) < 0)
+    x1 = ((size_t)datasize) <= 640 ? (struct Grammar *)alloca((size_t)datasize) : NULL;
+    if (_cffi_convert_array_argument(_cffi_type(20), arg1, (char **)&x1,
+            datasize, &large_args_free) < 0)
       return NULL;
   }
 
@@ -710,6 +893,7 @@ _cffi_f_dumpForest(PyObject *self, PyObject *args)
   Py_END_ALLOW_THREADS
 
   (void)self; /* unused */
+  if (large_args_free != NULL) _cffi_free_array_arguments(large_args_free);
   Py_INCREF(Py_None);
   return Py_None;
 }
@@ -731,7 +915,9 @@ _cffi_f_earleyParse(PyObject *self, PyObject *args)
   unsigned int x3;
   unsigned int * x4;
   Py_ssize_t datasize;
+  struct _cffi_freeme_s *large_args_free = NULL;
   struct Node * result;
+  PyObject *pyresult;
   PyObject *arg0;
   PyObject *arg1;
   PyObject *arg2;
@@ -742,13 +928,11 @@ _cffi_f_earleyParse(PyObject *self, PyObject *args)
     return NULL;
 
   datasize = _cffi_prepare_pointer_call_argument(
-      _cffi_type(9), arg0, (char **)&x0);
+      _cffi_type(13), arg0, (char **)&x0);
   if (datasize != 0) {
-    if (datasize < 0)
-      return NULL;
-    x0 = (struct Parser *)alloca((size_t)datasize);
-    memset((void *)x0, 0, (size_t)datasize);
-    if (_cffi_convert_array_from_object((char *)x0, _cffi_type(9), arg0) < 0)
+    x0 = ((size_t)datasize) <= 640 ? (struct Parser *)alloca((size_t)datasize) : NULL;
+    if (_cffi_convert_array_argument(_cffi_type(13), arg0, (char **)&x0,
+            datasize, &large_args_free) < 0)
       return NULL;
   }
 
@@ -765,13 +949,11 @@ _cffi_f_earleyParse(PyObject *self, PyObject *args)
     return NULL;
 
   datasize = _cffi_prepare_pointer_call_argument(
-      _cffi_type(13), arg4, (char **)&x4);
+      _cffi_type(17), arg4, (char **)&x4);
   if (datasize != 0) {
-    if (datasize < 0)
-      return NULL;
-    x4 = (unsigned int *)alloca((size_t)datasize);
-    memset((void *)x4, 0, (size_t)datasize);
-    if (_cffi_convert_array_from_object((char *)x4, _cffi_type(13), arg4) < 0)
+    x4 = ((size_t)datasize) <= 640 ? (unsigned int *)alloca((size_t)datasize) : NULL;
+    if (_cffi_convert_array_argument(_cffi_type(17), arg4, (char **)&x4,
+            datasize, &large_args_free) < 0)
       return NULL;
   }
 
@@ -782,7 +964,9 @@ _cffi_f_earleyParse(PyObject *self, PyObject *args)
   Py_END_ALLOW_THREADS
 
   (void)self; /* unused */
-  return _cffi_from_c_pointer((char *)result, _cffi_type(26));
+  pyresult = _cffi_from_c_pointer((char *)result, _cffi_type(31));
+  if (large_args_free != NULL) _cffi_free_array_arguments(large_args_free);
+  return pyresult;
 }
 #else
 #  define _cffi_f_earleyParse _cffi_d_earleyParse
@@ -798,16 +982,16 @@ _cffi_f_newGrammar(PyObject *self, PyObject *arg0)
 {
   char const * x0;
   Py_ssize_t datasize;
+  struct _cffi_freeme_s *large_args_free = NULL;
   struct Grammar * result;
+  PyObject *pyresult;
 
   datasize = _cffi_prepare_pointer_call_argument(
-      _cffi_type(6), arg0, (char **)&x0);
+      _cffi_type(10), arg0, (char **)&x0);
   if (datasize != 0) {
-    if (datasize < 0)
-      return NULL;
-    x0 = (char const *)alloca((size_t)datasize);
-    memset((void *)x0, 0, (size_t)datasize);
-    if (_cffi_convert_array_from_object((char *)x0, _cffi_type(6), arg0) < 0)
+    x0 = ((size_t)datasize) <= 640 ? (char const *)alloca((size_t)datasize) : NULL;
+    if (_cffi_convert_array_argument(_cffi_type(10), arg0, (char **)&x0,
+            datasize, &large_args_free) < 0)
       return NULL;
   }
 
@@ -818,15 +1002,17 @@ _cffi_f_newGrammar(PyObject *self, PyObject *arg0)
   Py_END_ALLOW_THREADS
 
   (void)self; /* unused */
-  return _cffi_from_c_pointer((char *)result, _cffi_type(16));
+  pyresult = _cffi_from_c_pointer((char *)result, _cffi_type(20));
+  if (large_args_free != NULL) _cffi_free_array_arguments(large_args_free);
+  return pyresult;
 }
 #else
 #  define _cffi_f_newGrammar _cffi_d_newGrammar
 #endif
 
-static struct Parser * _cffi_d_newParser(struct Grammar * x0, int(* x1)(unsigned int, unsigned int, unsigned int), unsigned char *(* x2)(unsigned int, unsigned int, unsigned int))
+static struct Parser * _cffi_d_newParser(struct Grammar * x0, int(* x1)(unsigned int, unsigned int, unsigned int), unsigned char *(* x2)(unsigned int, unsigned int, unsigned int), int(* x3)(unsigned int, unsigned int, unsigned int))
 {
-  return newParser(x0, x1, x2);
+  return newParser(x0, x1, x2, x3);
 }
 #ifndef PYPY_VERSION
 static PyObject *
@@ -835,42 +1021,50 @@ _cffi_f_newParser(PyObject *self, PyObject *args)
   struct Grammar * x0;
   int(* x1)(unsigned int, unsigned int, unsigned int);
   unsigned char *(* x2)(unsigned int, unsigned int, unsigned int);
+  int(* x3)(unsigned int, unsigned int, unsigned int);
   Py_ssize_t datasize;
+  struct _cffi_freeme_s *large_args_free = NULL;
   struct Parser * result;
+  PyObject *pyresult;
   PyObject *arg0;
   PyObject *arg1;
   PyObject *arg2;
+  PyObject *arg3;
 
-  if (!PyArg_UnpackTuple(args, "newParser", 3, 3, &arg0, &arg1, &arg2))
+  if (!PyArg_UnpackTuple(args, "newParser", 4, 4, &arg0, &arg1, &arg2, &arg3))
     return NULL;
 
   datasize = _cffi_prepare_pointer_call_argument(
-      _cffi_type(16), arg0, (char **)&x0);
+      _cffi_type(20), arg0, (char **)&x0);
   if (datasize != 0) {
-    if (datasize < 0)
-      return NULL;
-    x0 = (struct Grammar *)alloca((size_t)datasize);
-    memset((void *)x0, 0, (size_t)datasize);
-    if (_cffi_convert_array_from_object((char *)x0, _cffi_type(16), arg0) < 0)
+    x0 = ((size_t)datasize) <= 640 ? (struct Grammar *)alloca((size_t)datasize) : NULL;
+    if (_cffi_convert_array_argument(_cffi_type(20), arg0, (char **)&x0,
+            datasize, &large_args_free) < 0)
       return NULL;
   }
 
-  x1 = (int(*)(unsigned int, unsigned int, unsigned int))_cffi_to_c_pointer(arg1, _cffi_type(17));
+  x1 = (int(*)(unsigned int, unsigned int, unsigned int))_cffi_to_c_pointer(arg1, _cffi_type(21));
   if (x1 == (int(*)(unsigned int, unsigned int, unsigned int))NULL && PyErr_Occurred())
     return NULL;
 
-  x2 = (unsigned char *(*)(unsigned int, unsigned int, unsigned int))_cffi_to_c_pointer(arg2, _cffi_type(18));
+  x2 = (unsigned char *(*)(unsigned int, unsigned int, unsigned int))_cffi_to_c_pointer(arg2, _cffi_type(22));
   if (x2 == (unsigned char *(*)(unsigned int, unsigned int, unsigned int))NULL && PyErr_Occurred())
+    return NULL;
+
+  x3 = (int(*)(unsigned int, unsigned int, unsigned int))_cffi_to_c_pointer(arg3, _cffi_type(21));
+  if (x3 == (int(*)(unsigned int, unsigned int, unsigned int))NULL && PyErr_Occurred())
     return NULL;
 
   Py_BEGIN_ALLOW_THREADS
   _cffi_restore_errno();
-  { result = newParser(x0, x1, x2); }
+  { result = newParser(x0, x1, x2, x3); }
   _cffi_save_errno();
   Py_END_ALLOW_THREADS
 
   (void)self; /* unused */
-  return _cffi_from_c_pointer((char *)result, _cffi_type(9));
+  pyresult = _cffi_from_c_pointer((char *)result, _cffi_type(13));
+  if (large_args_free != NULL) _cffi_free_array_arguments(large_args_free);
+  return pyresult;
 }
 #else
 #  define _cffi_f_newParser _cffi_d_newParser
@@ -886,16 +1080,16 @@ _cffi_f_numCombinations(PyObject *self, PyObject *arg0)
 {
   struct Node * x0;
   Py_ssize_t datasize;
+  struct _cffi_freeme_s *large_args_free = NULL;
   unsigned int result;
+  PyObject *pyresult;
 
   datasize = _cffi_prepare_pointer_call_argument(
-      _cffi_type(26), arg0, (char **)&x0);
+      _cffi_type(31), arg0, (char **)&x0);
   if (datasize != 0) {
-    if (datasize < 0)
-      return NULL;
-    x0 = (struct Node *)alloca((size_t)datasize);
-    memset((void *)x0, 0, (size_t)datasize);
-    if (_cffi_convert_array_from_object((char *)x0, _cffi_type(26), arg0) < 0)
+    x0 = ((size_t)datasize) <= 640 ? (struct Node *)alloca((size_t)datasize) : NULL;
+    if (_cffi_convert_array_argument(_cffi_type(31), arg0, (char **)&x0,
+            datasize, &large_args_free) < 0)
       return NULL;
   }
 
@@ -906,7 +1100,9 @@ _cffi_f_numCombinations(PyObject *self, PyObject *arg0)
   Py_END_ALLOW_THREADS
 
   (void)self; /* unused */
-  return _cffi_from_c_int(result, unsigned int);
+  pyresult = _cffi_from_c_int(result, unsigned int);
+  if (large_args_free != NULL) _cffi_free_array_arguments(large_args_free);
+  return pyresult;
 }
 #else
 #  define _cffi_f_numCombinations _cffi_d_numCombinations
@@ -980,6 +1176,8 @@ static void _cffi_checkfld_struct_Node(struct Node *p)
   { struct Label *tmp = &p->label; (void)tmp; }
   { struct FamilyEntry * *tmp = &p->pHead; (void)tmp; }
   (void)((p->nRefCount) | 0);  /* check that 'struct Node.nRefCount' is an integer */
+  (void)((p->nScore) | 0);  /* check that 'struct Node.nScore' is an integer */
+  (void)((p->test) | 0);  /* check that 'struct Node.test' is an integer */
 }
 struct _cffi_align_struct_Node { char x; struct Node y; };
 
@@ -1004,37 +1202,34 @@ static void _cffi_checkfld_struct_Production(struct Production *p)
 }
 struct _cffi_align_struct_Production { char x; struct Production y; };
 
-static struct Node *_cffi_var_Node(void)
-{
-  return &(Node);
-}
-
 static const struct _cffi_global_s _cffi_globals[] = {
-  { "Node", (void *)_cffi_var_Node, _CFFI_OP(_CFFI_OP_GLOBAL_VAR_F, 49), (void *)0 },
-  { "deleteForest", (void *)_cffi_f_deleteForest, _CFFI_OP(_CFFI_OP_CPYTHON_BLTN_O, 31), (void *)_cffi_d_deleteForest },
-  { "deleteGrammar", (void *)_cffi_f_deleteGrammar, _CFFI_OP(_CFFI_OP_CPYTHON_BLTN_O, 28), (void *)_cffi_d_deleteGrammar },
-  { "deleteParser", (void *)_cffi_f_deleteParser, _CFFI_OP(_CFFI_OP_CPYTHON_BLTN_O, 38), (void *)_cffi_d_deleteParser },
-  { "dumpForest", (void *)_cffi_f_dumpForest, _CFFI_OP(_CFFI_OP_CPYTHON_BLTN_V, 34), (void *)_cffi_d_dumpForest },
-  { "earleyParse", (void *)_cffi_f_earleyParse, _CFFI_OP(_CFFI_OP_CPYTHON_BLTN_V, 8), (void *)_cffi_d_earleyParse },
-  { "newGrammar", (void *)_cffi_f_newGrammar, _CFFI_OP(_CFFI_OP_CPYTHON_BLTN_O, 5), (void *)_cffi_d_newGrammar },
-  { "newParser", (void *)_cffi_f_newParser, _CFFI_OP(_CFFI_OP_CPYTHON_BLTN_V, 15), (void *)_cffi_d_newParser },
-  { "numCombinations", (void *)_cffi_f_numCombinations, _CFFI_OP(_CFFI_OP_CPYTHON_BLTN_O, 25), (void *)_cffi_d_numCombinations },
-  { "printAllocationReport", (void *)_cffi_f_printAllocationReport, _CFFI_OP(_CFFI_OP_CPYTHON_BLTN_N, 41), (void *)_cffi_d_printAllocationReport },
+  { "alloc_func", (void *)&_cffi_externpy__alloc_func, _CFFI_OP(_CFFI_OP_EXTERN_PYTHON, 22), (void *)alloc_func },
+  { "deleteForest", (void *)_cffi_f_deleteForest, _CFFI_OP(_CFFI_OP_CPYTHON_BLTN_O, 36), (void *)_cffi_d_deleteForest },
+  { "deleteGrammar", (void *)_cffi_f_deleteGrammar, _CFFI_OP(_CFFI_OP_CPYTHON_BLTN_O, 33), (void *)_cffi_d_deleteGrammar },
+  { "deleteParser", (void *)_cffi_f_deleteParser, _CFFI_OP(_CFFI_OP_CPYTHON_BLTN_O, 43), (void *)_cffi_d_deleteParser },
+  { "dumpForest", (void *)_cffi_f_dumpForest, _CFFI_OP(_CFFI_OP_CPYTHON_BLTN_V, 39), (void *)_cffi_d_dumpForest },
+  { "earleyParse", (void *)_cffi_f_earleyParse, _CFFI_OP(_CFFI_OP_CPYTHON_BLTN_V, 12), (void *)_cffi_d_earleyParse },
+  { "matching_func", (void *)&_cffi_externpy__matching_func, _CFFI_OP(_CFFI_OP_EXTERN_PYTHON, 21), (void *)matching_func },
+  { "newGrammar", (void *)_cffi_f_newGrammar, _CFFI_OP(_CFFI_OP_CPYTHON_BLTN_O, 9), (void *)_cffi_d_newGrammar },
+  { "newParser", (void *)_cffi_f_newParser, _CFFI_OP(_CFFI_OP_CPYTHON_BLTN_V, 19), (void *)_cffi_d_newParser },
+  { "numCombinations", (void *)_cffi_f_numCombinations, _CFFI_OP(_CFFI_OP_CPYTHON_BLTN_O, 30), (void *)_cffi_d_numCombinations },
+  { "printAllocationReport", (void *)_cffi_f_printAllocationReport, _CFFI_OP(_CFFI_OP_CPYTHON_BLTN_N, 46), (void *)_cffi_d_printAllocationReport },
+  { "test_value_storage", (void *)&_cffi_externpy__test_value_storage, _CFFI_OP(_CFFI_OP_EXTERN_PYTHON, 50), (void *)test_value_storage },
 };
 
 static const struct _cffi_field_s _cffi_fields[] = {
   { "pProd", offsetof(struct FamilyEntry, pProd),
              sizeof(((struct FamilyEntry *)0)->pProd),
-             _CFFI_OP(_CFFI_OP_NOOP, 51) },
+             _CFFI_OP(_CFFI_OP_NOOP, 57) },
   { "p1", offsetof(struct FamilyEntry, p1),
           sizeof(((struct FamilyEntry *)0)->p1),
-          _CFFI_OP(_CFFI_OP_NOOP, 26) },
+          _CFFI_OP(_CFFI_OP_NOOP, 31) },
   { "p2", offsetof(struct FamilyEntry, p2),
           sizeof(((struct FamilyEntry *)0)->p2),
-          _CFFI_OP(_CFFI_OP_NOOP, 26) },
+          _CFFI_OP(_CFFI_OP_NOOP, 31) },
   { "pNext", offsetof(struct FamilyEntry, pNext),
              sizeof(((struct FamilyEntry *)0)->pNext),
-             _CFFI_OP(_CFFI_OP_NOOP, 45) },
+             _CFFI_OP(_CFFI_OP_NOOP, 51) },
   { "nNonterminals", offsetof(struct Grammar, nNonterminals),
                      sizeof(((struct Grammar *)0)->nNonterminals),
                      _CFFI_OP(_CFFI_OP_NOOP, 1) },
@@ -1043,16 +1238,16 @@ static const struct _cffi_field_s _cffi_fields[] = {
                   _CFFI_OP(_CFFI_OP_NOOP, 1) },
   { "iRoot", offsetof(struct Grammar, iRoot),
              sizeof(((struct Grammar *)0)->iRoot),
-             _CFFI_OP(_CFFI_OP_NOOP, 11) },
+             _CFFI_OP(_CFFI_OP_NOOP, 15) },
   { "iNt", offsetof(struct Label, iNt),
            sizeof(((struct Label *)0)->iNt),
-           _CFFI_OP(_CFFI_OP_NOOP, 11) },
+           _CFFI_OP(_CFFI_OP_NOOP, 15) },
   { "nDot", offsetof(struct Label, nDot),
             sizeof(((struct Label *)0)->nDot),
             _CFFI_OP(_CFFI_OP_NOOP, 1) },
   { "pProd", offsetof(struct Label, pProd),
              sizeof(((struct Label *)0)->pProd),
-             _CFFI_OP(_CFFI_OP_NOOP, 51) },
+             _CFFI_OP(_CFFI_OP_NOOP, 57) },
   { "nI", offsetof(struct Label, nI),
           sizeof(((struct Label *)0)->nI),
           _CFFI_OP(_CFFI_OP_NOOP, 1) },
@@ -1061,16 +1256,22 @@ static const struct _cffi_field_s _cffi_fields[] = {
           _CFFI_OP(_CFFI_OP_NOOP, 1) },
   { "label", offsetof(struct Node, label),
              sizeof(((struct Node *)0)->label),
-             _CFFI_OP(_CFFI_OP_NOOP, 48) },
+             _CFFI_OP(_CFFI_OP_NOOP, 54) },
   { "pHead", offsetof(struct Node, pHead),
              sizeof(((struct Node *)0)->pHead),
-             _CFFI_OP(_CFFI_OP_NOOP, 45) },
+             _CFFI_OP(_CFFI_OP_NOOP, 51) },
   { "nRefCount", offsetof(struct Node, nRefCount),
                  sizeof(((struct Node *)0)->nRefCount),
                  _CFFI_OP(_CFFI_OP_NOOP, 1) },
+  { "nScore", offsetof(struct Node, nScore),
+              sizeof(((struct Node *)0)->nScore),
+              _CFFI_OP(_CFFI_OP_NOOP, 1) },
+  { "test", offsetof(struct Node, test),
+            sizeof(((struct Node *)0)->test),
+            _CFFI_OP(_CFFI_OP_NOOP, 15) },
   { "pGrammar", offsetof(struct Parser, pGrammar),
                 sizeof(((struct Parser *)0)->pGrammar),
-                _CFFI_OP(_CFFI_OP_NOOP, 16) },
+                _CFFI_OP(_CFFI_OP_NOOP, 20) },
   { "nId", offsetof(struct Production, nId),
            sizeof(((struct Production *)0)->nId),
            _CFFI_OP(_CFFI_OP_NOOP, 1) },
@@ -1082,31 +1283,32 @@ static const struct _cffi_field_s _cffi_fields[] = {
          _CFFI_OP(_CFFI_OP_NOOP, 1) },
   { "pList", offsetof(struct Production, pList),
              sizeof(((struct Production *)0)->pList),
-             _CFFI_OP(_CFFI_OP_NOOP, 44) },
+             _CFFI_OP(_CFFI_OP_NOOP, 49) },
 };
 
 static const struct _cffi_struct_union_s _cffi_struct_unions[] = {
-  { "FamilyEntry", 46, _CFFI_F_CHECK_FIELDS,
+  { "FamilyEntry", 52, _CFFI_F_CHECK_FIELDS,
     sizeof(struct FamilyEntry), offsetof(struct _cffi_align_struct_FamilyEntry, y), 0, 4 },
-  { "Grammar", 47, _CFFI_F_CHECK_FIELDS,
+  { "Grammar", 53, _CFFI_F_CHECK_FIELDS,
     sizeof(struct Grammar), offsetof(struct _cffi_align_struct_Grammar, y), 4, 3 },
-  { "Label", 48, _CFFI_F_CHECK_FIELDS,
+  { "Label", 54, _CFFI_F_CHECK_FIELDS,
     sizeof(struct Label), offsetof(struct _cffi_align_struct_Label, y), 7, 5 },
-  { "Node", 49, _CFFI_F_CHECK_FIELDS,
-    sizeof(struct Node), offsetof(struct _cffi_align_struct_Node, y), 12, 3 },
-  { "Parser", 50, _CFFI_F_CHECK_FIELDS,
-    sizeof(struct Parser), offsetof(struct _cffi_align_struct_Parser, y), 15, 1 },
-  { "Production", 52, _CFFI_F_CHECK_FIELDS,
-    sizeof(struct Production), offsetof(struct _cffi_align_struct_Production, y), 16, 4 },
+  { "Node", 55, _CFFI_F_CHECK_FIELDS,
+    sizeof(struct Node), offsetof(struct _cffi_align_struct_Node, y), 12, 5 },
+  { "Parser", 56, _CFFI_F_CHECK_FIELDS,
+    sizeof(struct Parser), offsetof(struct _cffi_align_struct_Parser, y), 17, 1 },
+  { "Production", 58, _CFFI_F_CHECK_FIELDS,
+    sizeof(struct Production), offsetof(struct _cffi_align_struct_Production, y), 18, 4 },
 };
 
 static const struct _cffi_typename_s _cffi_typenames[] = {
-  { "AllocFunc", 18 },
-  { "BOOL", 11 },
-  { "BYTE", 54 },
-  { "CHAR", 43 },
-  { "INT", 11 },
-  { "MatchingFunc", 17 },
+  { "AllocFunc", 22 },
+  { "BOOL", 15 },
+  { "BYTE", 60 },
+  { "CHAR", 48 },
+  { "INT", 15 },
+  { "MatchingFunc", 21 },
+  { "TestValueStorage", 21 },
   { "UINT", 1 },
 };
 
@@ -1117,21 +1319,31 @@ static const struct _cffi_type_context_s _cffi_type_context = {
   _cffi_struct_unions,
   NULL,  /* no enums */
   _cffi_typenames,
-  10,  /* num_globals */
+  12,  /* num_globals */
   6,  /* num_struct_unions */
   0,  /* num_enums */
-  7,  /* num_typenames */
+  8,  /* num_typenames */
   NULL,  /* no includes */
-  56,  /* num_types */
-  0,  /* flags */
+  62,  /* num_types */
+  1,  /* flags */
 };
+
+#ifdef __GNUC__
+#  pragma GCC visibility push(default)  /* for -fvisibility= */
+#endif
 
 #ifdef PYPY_VERSION
 PyMODINIT_FUNC
 _cffi_pypyinit__eparser(const void *p[])
 {
+    if (((intptr_t)p[0]) >= 0x0A03) {
+        _cffi_call_python_org = (void(*)(struct _cffi_externpy_s *, char *))p[1];
+    }
     p[0] = (const void *)0x2601;
     p[1] = &_cffi_type_context;
+#if PY_MAJOR_VERSION >= 3
+    return NULL;
+#endif
 }
 #  ifdef _MSC_VER
      PyMODINIT_FUNC
@@ -1153,4 +1365,8 @@ init_eparser(void)
 {
   _cffi_init("reynir._eparser", 0x2601, &_cffi_type_context);
 }
+#endif
+
+#ifdef __GNUC__
+#  pragma GCC visibility pop
 #endif

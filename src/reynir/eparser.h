@@ -273,6 +273,9 @@ public:
 
 };
 
+// Test value storage on Python side.
+typedef BOOL (*TestValueStorage)(UINT nHandle, UINT nColumnNumber, UINT nTerminalValue);
+typedef UINT* (*TestGetFunc)(UINT nHandle, UINT nColumnNumber);
 
 class Node {
 
@@ -290,6 +293,7 @@ private:
    Label m_label;
    FamilyEntry* m_pHead;
    UINT m_nRefCount;
+   UINT m_nScore;
 
    static AllocCounter ac;
 
@@ -306,7 +310,11 @@ public:
       { this->m_nRefCount++; }
    void delRef(void);
 
-   void addFamily(Production*, Node* pW, Node* pV, Column** ppColumns, UINT i, INT nSymbolV, INT nSymbolW, State* pState);
+   void addFamily(Production*, Node* pW, Node* pV, Column** ppColumns, UINT i, INT nSymbolV, INT nSymbolW, State* pState, TestValueStorage testValueStorage, INT nHandle);
+
+   void setScore(UINT score);
+
+   UINT getScore();
 
    BOOL hasLabel(const Label& label) const
       { return this->m_label == label; }
@@ -347,10 +355,12 @@ private:
    Grammar* m_pGrammar;
    MatchingFunc m_pMatchingFunc;
    AllocFunc m_pAllocFunc;
+   TestValueStorage m_pTestValueStorage;
+   TestGetFunc m_pTestGetFunction;
 
    void push(UINT nHandle, State*, Column*, State*&, StateChunk*);
 
-   Node* makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, Column** ppColumns, UINT i);
+   Node* makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, Column** ppColumns, UINT i, UINT nHandle);
 
    // Internal token/terminal matching cache management
    BYTE* allocCache(UINT nHandle, UINT nToken, BOOL* pbNeedsRelease);
@@ -360,7 +370,7 @@ protected:
 
 public:
 
-   Parser(Grammar*, MatchingFunc = defaultMatcher, AllocFunc = NULL);
+   Parser(Grammar*, TestValueStorage, TestGetFunc, MatchingFunc = defaultMatcher, AllocFunc = NULL);
    ~Parser(void);
 
    UINT getNumTerminals(void) const
@@ -399,7 +409,7 @@ extern "C" Grammar* newGrammar(const CHAR* pszGrammarFile);
 
 extern "C" void deleteGrammar(Grammar*);
 
-extern "C" Parser* newParser(Grammar*, MatchingFunc fpMatcher = defaultMatcher, AllocFunc fpAlloc = NULL);
+extern "C" Parser* newParser(Grammar*, TestValueStorage fpTestValueStorage, TestGetFunc fpTestGetFunc, MatchingFunc fpMatcher = defaultMatcher, AllocFunc fpAlloc = NULL);
 
 extern "C" void deleteParser(Parser*);
 

@@ -874,7 +874,7 @@ void Node::delRef(void)
 }
 
 // TODO: Remove pState later as it is only used for debugging
-void Node::addFamily(Production* pProd, Node* pW, Node* pV, Column** ppColumns, UINT i, INT nSymbolV, INT nSymbolW, State* pState)
+void Node::addFamily(Production* pProd, Node* pW, Node* pV, Column** ppColumns, UINT i, INT nSymbolV, INT nSymbolW, State* pState, TestValueStorage testValueStorage, INT nHandle)
 {
    // pW may be NULL, or both may be NULL if epsilon
    FamilyEntry* p = this->m_pHead;
@@ -899,6 +899,9 @@ void Node::addFamily(Production* pProd, Node* pW, Node* pV, Column** ppColumns, 
       if(nChildSymbolW >= 0) // Note that the token symbol can be 0 whereas terminal symbol would be not (unless it is an epsilon terminal)
       {
          wasChild = true;
+         printf("Going to call testValueStorage with params nHandle %d, column %d, nSymbolW %d", nHandle, i-1, nSymbolW);
+         bool bla = testValueStorage(nHandle, i-1, nSymbolW);
+         printf("nSymbolW got through with bool = %d", bla);
          Label labelW(nSymbolW, 0, NULL, tokenLabelW.getI(), tokenLabelW.getJ());
          Node* terminalNodeW = new Node(labelW);
          p->p1 = terminalNodeW;
@@ -922,6 +925,10 @@ void Node::addFamily(Production* pProd, Node* pW, Node* pV, Column** ppColumns, 
       if(nChildSymbolV >= 0)
       {
          wasChild = true;
+         printf("Going to call testValueStorage with params nHandle %d, column %d, nSymbolV %d", nHandle, i, nSymbolV);
+         ASSERT(testValueStorage != NULL);
+         bool bla = testValueStorage(nHandle, i, nSymbolV);
+         printf("nSymbolV got through with bool = %d", bla);
          Label labelV(nSymbolV, 0, NULL, tokenLabelV.getI(), tokenLabelV.getJ());
          Node* terminalNodeV = new Node(labelV);
          p->p2 = terminalNodeV;
@@ -1022,6 +1029,15 @@ UINT Node::numCombinations(Node* pNode)
    return nComb == 0 ? 1 : nComb;
 }
 
+void Node::setScore(UINT score)
+{
+   this->m_nScore = score;
+}
+
+UINT Node::getScore()
+{
+   return this->m_nScore;
+}
 
 NodeDict::NodeDict(void)
    : m_pHead(NULL)
@@ -1067,11 +1083,13 @@ void NodeDict::reset(void)
 }
 
 
-Parser::Parser(Grammar* p, MatchingFunc pMatchingFunc, AllocFunc pAllocFunc)
-   : m_pGrammar(p), m_pMatchingFunc(pMatchingFunc), m_pAllocFunc(pAllocFunc)
+Parser::Parser(Grammar* p, TestValueStorage pTestValueStorage, TestGetFunc pTestGetFunction, MatchingFunc pMatchingFunc, AllocFunc pAllocFunc)
+   : m_pGrammar(p), m_pMatchingFunc(pMatchingFunc), m_pAllocFunc(pAllocFunc), m_pTestValueStorage(pTestValueStorage), m_pTestGetFunction(pTestGetFunction)
 {
    ASSERT(this->m_pGrammar != NULL);
    ASSERT(this->m_pMatchingFunc != NULL);
+   ASSERT(this->m_pTestValueStorage != NULL);
+   ASSERT(this->m_pTestGetFunction != NULL);
 }
 
 Parser::~Parser(void)
@@ -1104,7 +1122,7 @@ void Parser::releaseCache(BYTE* abCache)
    delete [] abCache;
 }
 
-Node* Parser::makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, Column** ppColumns, UINT i)
+Node* Parser::makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, Column** ppColumns, UINT i, UINT nHandle)
 {
    UINT nDot = pState->getDot() + 1;
    Production* pProd = pState->getProd();
@@ -1141,7 +1159,7 @@ Node* Parser::makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, Column
    }
    Label label(iNtB, nDot, pProdLabel, nStart, nEnd);
    Node* pY = ndV.lookupOrAdd(label);
-   pY->addFamily(pProd, pW, pV, ppColumns, i, nSymbolV, nSymbolW, pState); // pW may be NULL
+   pY->addFamily(pProd, pW, pV, ppColumns, i, nSymbolV, nSymbolW, pState, this->m_pTestValueStorage, nHandle); // pW may be NULL
    return pY;
 }
 
@@ -1281,7 +1299,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             while (ph) {
                if (ph->getNt() == iItem) {
                   //printf("From predictor HNode handling - ");
-                  Node* pY = this->makeNode(pState, i, ph->getV(), ndV, pCol, i);
+                  Node* pY = this->makeNode(pState, i, ph->getV(), ndV, pCol, i, nHandle);
                   State* psNew = new (pChunkHead) State(pState, pY);
                   this->push(nHandle, psNew, pEi, pQ, pChunkHead);
                }
@@ -1297,7 +1315,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             if (!pW) {
                Label label(iNtB, 0, NULL, i, i);
                pW = ndV.lookupOrAdd(label);
-               pW->addFamily(pState->getProd(), NULL, NULL, pCol, i, NULL, NULL, pState); // Epsilon production
+               pW->addFamily(pState->getProd(), NULL, NULL, pCol, i, NULL, NULL, pState, this->m_pTestValueStorage, nHandle); // Epsilon production
             }
             if (nStart == i) {
                HNode* ph = new HNode(iNtB, pW);
@@ -1307,7 +1325,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             State* psNt = pCol[nStart]->getNtHead(iNtB);
             while (psNt) {
                // printf("From completer - ");
-               Node* pY = this->makeNode(psNt, i, pW, ndV, pCol, i);
+               Node* pY = this->makeNode(psNt, i, pW, ndV, pCol, i, nHandle);
                State* psNew = new (pChunkHead) State(psNt, pY);
                this->push(nHandle, psNew, pEi, pQ, pChunkHead);
                psNt = psNt->getNtNext();
@@ -1345,7 +1363,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
          // Earley scanner
          State* psNext = pQ->getNext();
          // printf("From scanner - ");
-         Node* pY = this->makeNode(pQ, i + 1, pV, ndV, pCol, i);
+         Node* pY = this->makeNode(pQ, i + 1, pV, ndV, pCol, i, nHandle);
          // Instead of throwing away the old state and creating
          // a new almost identical one, re-use the old after
          // 'incrementing' it by moving the dot one step to the right
@@ -1353,6 +1371,18 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
          ASSERT(i + 1 <= nTokens);
          this->push(nHandle, pQ, pCol[i + 1], pQ0, pChunkHead);
          pQ = psNext;
+      }
+
+      // TODO: Add terminal scoring here
+      if(i > 0) 
+      {
+         UINT* bla = this->m_pTestGetFunction(nHandle, i-1);
+         printf("Number if items: %d, items: ", *bla);
+         for(int i = 1; i < *bla; i++)
+         {
+            printf("%d ", bla[i]);
+         }
+         printf("\n");
       }
 
       // Clean up reference to pV created above
@@ -1489,11 +1519,11 @@ void deleteGrammar(Grammar* pGrammar)
       delete pGrammar;
 }
 
-Parser* newParser(Grammar* pGrammar, MatchingFunc fpMatcher, AllocFunc fpAlloc)
+Parser* newParser(Grammar* pGrammar, TestValueStorage fpTestValueStorage, TestGetFunc fpTestGetFunc, MatchingFunc fpMatcher, AllocFunc fpAlloc)
 {
-   if (!pGrammar || !fpMatcher)
+   if (!pGrammar || !fpMatcher || !fpTestValueStorage || !fpTestGetFunc)
       return NULL;
-   return new Parser(pGrammar, fpMatcher, fpAlloc);
+   return new Parser(pGrammar, fpTestValueStorage, fpTestGetFunc, fpMatcher, fpAlloc);
 }
 
 void deleteParser(Parser* pParser)
