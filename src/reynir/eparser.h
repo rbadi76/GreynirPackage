@@ -273,9 +273,8 @@ public:
 
 };
 
-// Test value storage on Python side.
-typedef BOOL (*TestValueStorage)(UINT nHandle, UINT nColumnNumber, UINT nTerminalValue);
-typedef UINT* (*TestGetFunc)(UINT nHandle, UINT nColumnNumber);
+// Callback function to Python to add a terminal to a set for a specific column / Earley set.
+typedef BOOL (*AddTerminalToSetFunc)(UINT nHandle, UINT nColumnNumber, UINT nTerminalValue);
 
 class Node {
 
@@ -293,7 +292,8 @@ private:
    Label m_label;
    FamilyEntry* m_pHead;
    UINT m_nRefCount;
-   UINT m_nScore;
+   INT m_nScore;
+   BOOL m_bHasScore = false;
 
    static AllocCounter ac;
 
@@ -310,11 +310,15 @@ public:
       { this->m_nRefCount++; }
    void delRef(void);
 
-   void addFamily(Production*, Node* pW, Node* pV, Column** ppColumns, UINT i, INT nSymbolV, INT nSymbolW, State* pState, TestValueStorage testValueStorage, INT nHandle);
+   void addFamily(Production*, Node* pW, Node* pV, UINT i, INT nSymbolV, INT nSymbolW, State* pState, AddTerminalToSetFunc addTerminalToSetFunc, INT nHandle);
 
-   void setScore(UINT score);
+   void setScore(INT score);
 
-   UINT getScore();
+   INT getScore();
+
+   void setScoreFlag();
+
+   BOOL getScoreFlag();
 
    BOOL hasLabel(const Label& label) const
       { return this->m_label == label; }
@@ -355,8 +359,7 @@ private:
    Grammar* m_pGrammar;
    MatchingFunc m_pMatchingFunc;
    AllocFunc m_pAllocFunc;
-   TestValueStorage m_pTestValueStorage;
-   TestGetFunc m_pTestGetFunction;
+   AddTerminalToSetFunc m_pAddTerminalToSetFunc;
 
    void push(UINT nHandle, State*, Column*, State*&, StateChunk*);
 
@@ -370,7 +373,7 @@ protected:
 
 public:
 
-   Parser(Grammar*, TestValueStorage, TestGetFunc, MatchingFunc = defaultMatcher, AllocFunc = NULL);
+   Parser(Grammar*, AddTerminalToSetFunc, MatchingFunc = defaultMatcher, AllocFunc = NULL);
    ~Parser(void);
 
    UINT getNumTerminals(void) const
@@ -395,7 +398,7 @@ public:
 
    static void printProduction(State* pState);
    static void printProduction(Production* pProd, INT lhs, INT nDot);
-   static void printSets(Column** columns, INT tokenSequenceLength);
+   //static void printSets(Column** columns, INT tokenSequenceLength);
 
 };
 
@@ -409,7 +412,7 @@ extern "C" Grammar* newGrammar(const CHAR* pszGrammarFile);
 
 extern "C" void deleteGrammar(Grammar*);
 
-extern "C" Parser* newParser(Grammar*, TestValueStorage fpTestValueStorage, TestGetFunc fpTestGetFunc, MatchingFunc fpMatcher = defaultMatcher, AllocFunc fpAlloc = NULL);
+extern "C" Parser* newParser(Grammar*, AddTerminalToSetFunc fpAddTerminalToSetFunc, MatchingFunc fpMatcher = defaultMatcher, AllocFunc fpAlloc = NULL);
 
 extern "C" void deleteParser(Parser*);
 

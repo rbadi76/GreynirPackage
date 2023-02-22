@@ -179,9 +179,6 @@ private:
    HashBin m_aHash[HASH_BINS]; // The hash bin array
    UINT m_nEnumBin; // Round robin used during enumeration of states
 
-   // Contains pointers to terminals matched with the token, null for orphaned token nodes that will be matched in the next round.
-   std::set <INT> m_setTerminalsInColumn; 
-
    static AllocCounter ac;
    static AllocCounter acMatches;
 
@@ -207,9 +204,6 @@ public:
    State* getNtHead(INT iNt) const;
 
    BOOL matches(UINT nHandle, UINT nTerminal) const;
-
-   void insertIntoTerminalsSet(INT nTerminal);
-   std::set <INT> getTerminalsSet();
 };
 
 class HNode {
@@ -620,17 +614,6 @@ BOOL Column::matches(UINT nHandle, UINT nTerminal) const
    return b;
 }
 
-void Column::insertIntoTerminalsSet(INT terminal)
-{
-   this->m_setTerminalsInColumn.insert(terminal);
-}
-
-std::set <INT> Column::getTerminalsSet()
-{
-   return this->m_setTerminalsInColumn;
-}
-
-
 class File {
 
    // Safe wrapper for FILE*
@@ -874,7 +857,7 @@ void Node::delRef(void)
 }
 
 // TODO: Remove pState later as it is only used for debugging
-void Node::addFamily(Production* pProd, Node* pW, Node* pV, Column** ppColumns, UINT i, INT nSymbolV, INT nSymbolW, State* pState, TestValueStorage testValueStorage, INT nHandle)
+void Node::addFamily(Production* pProd, Node* pW, Node* pV, UINT i, INT nSymbolV, INT nSymbolW, State* pState, AddTerminalToSetFunc fpAddTerminalToSetFunc, INT nHandle)
 {
    // pW may be NULL, or both may be NULL if epsilon
    FamilyEntry* p = this->m_pHead;
@@ -899,13 +882,11 @@ void Node::addFamily(Production* pProd, Node* pW, Node* pV, Column** ppColumns, 
       if(nChildSymbolW >= 0) // Note that the token symbol can be 0 whereas terminal symbol would be not (unless it is an epsilon terminal)
       {
          wasChild = true;
-         printf("Going to call testValueStorage with params nHandle %d, column %d, nSymbolW %d", nHandle, i-1, nSymbolW);
-         bool bla = testValueStorage(nHandle, i-1, nSymbolW);
-         printf("nSymbolW got through with bool = %d", bla);
+         bool success = fpAddTerminalToSetFunc(nHandle, i-1, nSymbolW);
+         if(!success) printf("fpAddTerminalToSetFunc returned False for node pW. This should not happen.\n");
          Label labelW(nSymbolW, 0, NULL, tokenLabelW.getI(), tokenLabelW.getJ());
          Node* terminalNodeW = new Node(labelW);
          p->p1 = terminalNodeW;
-         ppColumns[i-1]->insertIntoTerminalsSet(nSymbolW);
          printf("addFamily pW - Added terminal %d to terminals set for column %d\n", nSymbolW, i-1);
       }
       else
@@ -925,14 +906,11 @@ void Node::addFamily(Production* pProd, Node* pW, Node* pV, Column** ppColumns, 
       if(nChildSymbolV >= 0)
       {
          wasChild = true;
-         printf("Going to call testValueStorage with params nHandle %d, column %d, nSymbolV %d", nHandle, i, nSymbolV);
-         ASSERT(testValueStorage != NULL);
-         bool bla = testValueStorage(nHandle, i, nSymbolV);
-         printf("nSymbolV got through with bool = %d", bla);
+         bool success = fpAddTerminalToSetFunc(nHandle, i, nSymbolV);
+         if(!success) printf("fpAddTerminalToSetFunc returned False for node pV. This should not happen.\n");
          Label labelV(nSymbolV, 0, NULL, tokenLabelV.getI(), tokenLabelV.getJ());
          Node* terminalNodeV = new Node(labelV);
          p->p2 = terminalNodeV;
-         ppColumns[i]->insertIntoTerminalsSet(nSymbolV);
          printf("addFamily pV - Added terminal %d to terminals set for column %d\n", nSymbolV, i);
       }
       else
@@ -1029,14 +1007,24 @@ UINT Node::numCombinations(Node* pNode)
    return nComb == 0 ? 1 : nComb;
 }
 
-void Node::setScore(UINT score)
+void Node::setScore(INT score)
 {
    this->m_nScore = score;
 }
 
-UINT Node::getScore()
+INT Node::getScore()
 {
    return this->m_nScore;
+}
+
+void Node::setScoreFlag()
+{
+   this->m_bHasScore = true;
+}
+
+BOOL Node::getScoreFlag()
+{
+   return this->m_bHasScore;
 }
 
 NodeDict::NodeDict(void)
@@ -1083,13 +1071,12 @@ void NodeDict::reset(void)
 }
 
 
-Parser::Parser(Grammar* p, TestValueStorage pTestValueStorage, TestGetFunc pTestGetFunction, MatchingFunc pMatchingFunc, AllocFunc pAllocFunc)
-   : m_pGrammar(p), m_pMatchingFunc(pMatchingFunc), m_pAllocFunc(pAllocFunc), m_pTestValueStorage(pTestValueStorage), m_pTestGetFunction(pTestGetFunction)
+Parser::Parser(Grammar* p, AddTerminalToSetFunc fpAddTerminalToSetFunc, MatchingFunc pMatchingFunc, AllocFunc pAllocFunc)
+   : m_pGrammar(p), m_pAddTerminalToSetFunc(fpAddTerminalToSetFunc), m_pMatchingFunc(pMatchingFunc), m_pAllocFunc(pAllocFunc)
 {
    ASSERT(this->m_pGrammar != NULL);
    ASSERT(this->m_pMatchingFunc != NULL);
-   ASSERT(this->m_pTestValueStorage != NULL);
-   ASSERT(this->m_pTestGetFunction != NULL);
+   ASSERT(this->m_pAddTerminalToSetFunc != NULL);
 }
 
 Parser::~Parser(void)
@@ -1159,7 +1146,7 @@ Node* Parser::makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, Column
    }
    Label label(iNtB, nDot, pProdLabel, nStart, nEnd);
    Node* pY = ndV.lookupOrAdd(label);
-   pY->addFamily(pProd, pW, pV, ppColumns, i, nSymbolV, nSymbolW, pState, this->m_pTestValueStorage, nHandle); // pW may be NULL
+   pY->addFamily(pProd, pW, pV, i, nSymbolV, nSymbolW, pState, this->m_pAddTerminalToSetFunc, nHandle); // pW may be NULL
    return pY;
 }
 
@@ -1315,7 +1302,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             if (!pW) {
                Label label(iNtB, 0, NULL, i, i);
                pW = ndV.lookupOrAdd(label);
-               pW->addFamily(pState->getProd(), NULL, NULL, pCol, i, NULL, NULL, pState, this->m_pTestValueStorage, nHandle); // Epsilon production
+               pW->addFamily(pState->getProd(), NULL, NULL, i, NULL, NULL, pState, this->m_pAddTerminalToSetFunc, nHandle); // Epsilon production
             }
             if (nStart == i) {
                HNode* ph = new HNode(iNtB, pW);
@@ -1374,16 +1361,6 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       }
 
       // TODO: Add terminal scoring here
-      if(i > 0) 
-      {
-         UINT* bla = this->m_pTestGetFunction(nHandle, i-1);
-         printf("Number if items: %d, items: ", *bla);
-         for(int i = 1; i < *bla; i++)
-         {
-            printf("%d ", bla[i]);
-         }
-         printf("\n");
-      }
 
       // Clean up reference to pV created above
       if (pV)
@@ -1391,7 +1368,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       
       printf("Parser finished round %d\n", i);
 
-   if(i == nTokens) Helper::printSets(pCol, i);
+   // if(i == nTokens) Helper::printSets(pCol, i);
 
 #ifdef DEBUG
       clock_t clockNow = clock();
@@ -1519,11 +1496,11 @@ void deleteGrammar(Grammar* pGrammar)
       delete pGrammar;
 }
 
-Parser* newParser(Grammar* pGrammar, TestValueStorage fpTestValueStorage, TestGetFunc fpTestGetFunc, MatchingFunc fpMatcher, AllocFunc fpAlloc)
+Parser* newParser(Grammar* pGrammar, AddTerminalToSetFunc fpAddTerminalToSetFunc, MatchingFunc fpMatcher, AllocFunc fpAlloc)
 {
-   if (!pGrammar || !fpMatcher || !fpTestValueStorage || !fpTestGetFunc)
+   if (!pGrammar || !fpMatcher || !fpAddTerminalToSetFunc)
       return NULL;
-   return new Parser(pGrammar, fpTestValueStorage, fpTestGetFunc, fpMatcher, fpAlloc);
+   return new Parser(pGrammar, fpAddTerminalToSetFunc, fpMatcher, fpAlloc);
 }
 
 void deleteParser(Parser* pParser)
@@ -1602,7 +1579,9 @@ void Helper::printProduction(Production* pProd, INT lhs, INT nDot)
       printf("%d | ", vProductions[i]);
    printf("\n");
 }
-
+/* 
+TODO: Delete later on.
+Old test function - might use again in case I want to see the sets from the python side on the C++ side. Not sure.
 void Helper::printSets(Column** cols, INT tokenSequenceLength)
 {
    for(int i=0; i <= tokenSequenceLength; i++)
@@ -1618,3 +1597,4 @@ void Helper::printSets(Column** cols, INT tokenSequenceLength)
       printf("\n");
    }
 }
+*/

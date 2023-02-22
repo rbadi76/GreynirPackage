@@ -168,7 +168,7 @@ class ParseJob:
         # Return False to re-throw exception from the context, if any
         return False
 
-    def tst_value_storage(self, column_number: int, terminal_value: int) -> bool:
+    def add_terminal_to_set_for_column(self, column_number: int, terminal_number: int) -> bool:
         if(len(self._columns) == column_number):
             self._columns.append(set())
         elif(len(self._columns) > column_number + 1):
@@ -176,7 +176,7 @@ class ParseJob:
             return False
         
         column:Set = self._columns[column_number]
-        column.add(terminal_value)
+        column.add(terminal_number)
 
         print("Current number of terminals in column {} is {}".format(column_number, len(column)))
         return True
@@ -224,14 +224,9 @@ class ParseJob:
         return cls._jobs[handle].alloc_cache(token_index, size)
 
     @classmethod
-    def test_val_storage(cls, handle: int, column_number: int, terminal_number: int) -> bool:
-        """Dispach the request to the correct parse job"""
-        return cls._jobs[handle].tst_value_storage(column_number, terminal_number)
-
-    @classmethod
-    def test_terminals_get(cls, handle: int, column_number: int) -> Any:
+    def add_terminal_to_set(cls, handle: int, column_numer: int, terminal_number: int) -> bool:
         """Dispatch the request to the correct parse job"""
-        return cls._jobs[handle].get_terminals_for_column(column_number)
+        return cls._jobs[handle].add_terminal_to_set_for_column(column_numer, terminal_number)
 
 # Declare CFFI callback functions to be called from the C++ code
 # See: https://cffi.readthedocs.io/en/latest/using.html#extern-python-new-style-callbacks
@@ -256,19 +251,12 @@ def alloc_func(handle: int, token_index: int, size: int):
     so we avoid making unnecessary matching calls."""
     return ParseJob.alloc(handle, token_index, size)
 
-#@ffi.def_extern() # type: ignore
-#def terminal_scoring_func(handle: int, )
-
 @ffi.def_extern() # type: ignore
-def testv_func(handle: int, column_number: int, terminal_value: int):
-    """Test if this works. Sending column number and terminals found
-    to be retreived later."""
-    return ParseJob.test_val_storage(handle, column_number, terminal_value)
-
-@ffi.def_extern() # type: ignore
-def test_get_func(handle: int, column_number: int):
-    """Test if this works. Get the terminal values"""
-    return ParseJob.test_terminals_get(handle, column_number)
+def add_terminal_func(handle: int, column_number: int, terminal_value: int):
+    """Add terminal to terminals set for a column / Earley set. They will
+    then be scored later when all terminals for a token position have been
+    created."""
+    return ParseJob.add_terminal_to_set(handle, column_number, terminal_value)
 
 class Node:
 
@@ -736,7 +724,7 @@ class Fast_Parser(BIN_Parser):
             # Create a C++ parser object for the grammar, passing the proxies for the
             # two Python callback functions into it
             self._c_parser: Any = eparser.newParser(  # type: ignore
-                c_grammar, eparser.testv_func, eparser.test_get_func, eparser.matching_func, eparser.alloc_func  # type: ignore
+                c_grammar, eparser.add_terminal_func, eparser.matching_func, eparser.alloc_func  # type: ignore
             )
             # Find the index of the default root nonterminal for this parser instance
             self._root_index = (

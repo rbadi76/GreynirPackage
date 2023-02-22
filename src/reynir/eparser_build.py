@@ -92,19 +92,18 @@ declarations = """
         struct Label label;
         struct FamilyEntry* pHead;
         UINT nRefCount;
-        UINT nScore;
-        INT test;
+        INT nScore;
+        BOOL bHasScore;
     };
 
     typedef BOOL (*MatchingFunc)(UINT nHandle, UINT nToken, UINT nTerminal);
     typedef BYTE* (*AllocFunc)(UINT nHandle, UINT nToken, UINT nSize);
-    typedef BOOL (*TestValueStorage)(UINT nHandle, UINT nColumnNumber, UINT nTerminalValue);
-    typedef UINT* (*TestGetFunc)(UINT nHandle, UINT nColumnNumber);
+    typedef BOOL (*AddTerminalToSetFunc)(UINT nHandle, UINT nColumnNumber, UINT nTerminalValue);    
 
     struct Node* earleyParse(struct Parser*, UINT nTokens, INT iRoot, UINT nHandle, UINT* pnErrorToken);
     struct Grammar* newGrammar(const CHAR* pszGrammarFile);
     void deleteGrammar(struct Grammar*);
-    struct Parser* newParser(struct Grammar*, TestValueStorage fpTestValueStorage, TestGetFunc fpTestGetFunc, MatchingFunc fpMatcher, AllocFunc fpAlloc);
+    struct Parser* newParser(struct Grammar*, AddTerminalToSetFunc fpAddTerminalToSetFunc, MatchingFunc fpMatcher, AllocFunc fpAlloc);
     void deleteParser(struct Parser*);
     void deleteForest(struct Node*);
     void dumpForest(struct Node*, struct Grammar*);
@@ -121,8 +120,7 @@ callbacks = """
 
     extern "Python" BOOL matching_func(UINT, UINT, UINT);
     extern "Python" BYTE* alloc_func(UINT, UINT, UINT);
-    extern "Python" BOOL testv_func(UINT, UINT, UINT);
-    extern "Python" UINT* test_get_func(UINT, UINT);
+    extern "Python" BOOL  add_terminal_func(UINT, UINT, UINT);
 
 """
 
