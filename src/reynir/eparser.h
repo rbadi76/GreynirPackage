@@ -276,6 +276,9 @@ public:
 // Callback function to Python to add a terminal to a set for a specific column / Earley set.
 typedef BOOL (*AddTerminalToSetFunc)(UINT nHandle, UINT nColumnNumber, UINT nTerminalValue);
 
+// Callback function to start scoring terminals associated with a column / Earley set
+typedef BOOL (*StartScoringTerminalsForColumnFunc)(UINT nHandle, UINT nColumnNumber);
+
 class Node {
 
    friend class AllocReporter;
@@ -360,6 +363,7 @@ private:
    MatchingFunc m_pMatchingFunc;
    AllocFunc m_pAllocFunc;
    AddTerminalToSetFunc m_pAddTerminalToSetFunc;
+   StartScoringTerminalsForColumnFunc m_pStartScoringTerminalsForColumnFunc;
 
    void push(UINT nHandle, State*, Column*, State*&, StateChunk*);
 
@@ -373,7 +377,7 @@ protected:
 
 public:
 
-   Parser(Grammar*, AddTerminalToSetFunc, MatchingFunc = defaultMatcher, AllocFunc = NULL);
+   Parser(Grammar*, AddTerminalToSetFunc, StartScoringTerminalsForColumnFunc, MatchingFunc = defaultMatcher, AllocFunc = NULL);
    ~Parser(void);
 
    UINT getNumTerminals(void) const
@@ -412,7 +416,7 @@ extern "C" Grammar* newGrammar(const CHAR* pszGrammarFile);
 
 extern "C" void deleteGrammar(Grammar*);
 
-extern "C" Parser* newParser(Grammar*, AddTerminalToSetFunc fpAddTerminalToSetFunc, MatchingFunc fpMatcher = defaultMatcher, AllocFunc fpAlloc = NULL);
+extern "C" Parser* newParser(Grammar*, AddTerminalToSetFunc fpAddTerminalToSetFunc, StartScoringTerminalsForColumnFunc fpStartScoringTerminalsForColumn, MatchingFunc fpMatcher = defaultMatcher, AllocFunc fpAlloc = NULL);
 
 extern "C" void deleteParser(Parser*);
 

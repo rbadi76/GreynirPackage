@@ -1071,12 +1071,13 @@ void NodeDict::reset(void)
 }
 
 
-Parser::Parser(Grammar* p, AddTerminalToSetFunc fpAddTerminalToSetFunc, MatchingFunc pMatchingFunc, AllocFunc pAllocFunc)
-   : m_pGrammar(p), m_pAddTerminalToSetFunc(fpAddTerminalToSetFunc), m_pMatchingFunc(pMatchingFunc), m_pAllocFunc(pAllocFunc)
+Parser::Parser(Grammar* p, AddTerminalToSetFunc fpAddTerminalToSetFunc, StartScoringTerminalsForColumnFunc fpStartScoringTerminalsForColumn, MatchingFunc pMatchingFunc, AllocFunc pAllocFunc)
+   : m_pGrammar(p), m_pAddTerminalToSetFunc(fpAddTerminalToSetFunc), m_pStartScoringTerminalsForColumnFunc(fpStartScoringTerminalsForColumn), m_pMatchingFunc(pMatchingFunc), m_pAllocFunc(pAllocFunc)
 {
    ASSERT(this->m_pGrammar != NULL);
    ASSERT(this->m_pMatchingFunc != NULL);
    ASSERT(this->m_pAddTerminalToSetFunc != NULL);
+   ASSERT(this->m_pStartScoringTerminalsForColumnFunc);
 }
 
 Parser::~Parser(void)
@@ -1361,6 +1362,11 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       }
 
       // TODO: Add terminal scoring here
+      if(i > 0)
+      {
+         printf("Starting to score for column %d\n", i-1);
+         this->m_pStartScoringTerminalsForColumnFunc(nHandle, i-1);
+      }
 
       // Clean up reference to pV created above
       if (pV)
@@ -1496,11 +1502,11 @@ void deleteGrammar(Grammar* pGrammar)
       delete pGrammar;
 }
 
-Parser* newParser(Grammar* pGrammar, AddTerminalToSetFunc fpAddTerminalToSetFunc, MatchingFunc fpMatcher, AllocFunc fpAlloc)
+Parser* newParser(Grammar* pGrammar, AddTerminalToSetFunc fpAddTerminalToSetFunc,StartScoringTerminalsForColumnFunc fpStartScoringTerminalsForColumn, MatchingFunc fpMatcher, AllocFunc fpAlloc)
 {
-   if (!pGrammar || !fpMatcher || !fpAddTerminalToSetFunc)
+   if (!pGrammar || !fpMatcher || !fpAddTerminalToSetFunc || !fpStartScoringTerminalsForColumn)
       return NULL;
-   return new Parser(pGrammar, fpAddTerminalToSetFunc, fpMatcher, fpAlloc);
+   return new Parser(pGrammar, fpAddTerminalToSetFunc, fpStartScoringTerminalsForColumn, fpMatcher, fpAlloc);
 }
 
 void deleteParser(Parser* pParser)

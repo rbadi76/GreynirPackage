@@ -180,6 +180,15 @@ class ParseJob:
 
         print("Current number of terminals in column {} is {}".format(column_number, len(column)))
         return True
+
+    def start_scoring_terminals_for_column(self, column_number: int) -> bool:
+        """Start scoring terminals for a given token position / column. Note that the terminals' position
+        is zero base as they are created by the SCANNER before before processing Earley items for the 
+        Earley set for the given token position. So if we have the sentence 'Hún réð sig til vinnu á gúmmíbát.'
+        then the terminals for 'Hún' are in the set for column 0 although the token position is number 1."""
+        # TODO: Implement later. First make sure everything is properly connected
+        print("Call successfully receive on the Python side.")
+        return True
     
     def get_terminals_for_column(self, column_number: int) -> Any:
         print("Get the terminals for column {}. Number terminals: {}.".format(column_number, len(self._columns[column_number])))
@@ -224,9 +233,14 @@ class ParseJob:
         return cls._jobs[handle].alloc_cache(token_index, size)
 
     @classmethod
-    def add_terminal_to_set(cls, handle: int, column_numer: int, terminal_number: int) -> bool:
+    def add_terminal_to_set(cls, handle: int, column_number: int, terminal_number: int) -> bool:
         """Dispatch the request to the correct parse job"""
-        return cls._jobs[handle].add_terminal_to_set_for_column(column_numer, terminal_number)
+        return cls._jobs[handle].add_terminal_to_set_for_column(column_number, terminal_number)
+
+    @classmethod
+    def start_score_terminals_for_column(cls, handle: int, column_number: int):
+        """Dispatch the request to the correct parse job"""
+        return cls._jobs[handle].start_scoring_terminals_for_column(column_number)
 
 # Declare CFFI callback functions to be called from the C++ code
 # See: https://cffi.readthedocs.io/en/latest/using.html#extern-python-new-style-callbacks
@@ -257,6 +271,11 @@ def add_terminal_func(handle: int, column_number: int, terminal_value: int):
     then be scored later when all terminals for a token position have been
     created."""
     return ParseJob.add_terminal_to_set(handle, column_number, terminal_value)
+
+@ffi.def_extern() # type: ignore
+def score_terminals_func(handle: int, column_number: int):
+    """Score all accumulated terminals in the set for a particular column / Earley set"""
+    return ParseJob.start_score_terminals_for_column(handle, column_number)
 
 class Node:
 
@@ -724,7 +743,7 @@ class Fast_Parser(BIN_Parser):
             # Create a C++ parser object for the grammar, passing the proxies for the
             # two Python callback functions into it
             self._c_parser: Any = eparser.newParser(  # type: ignore
-                c_grammar, eparser.add_terminal_func, eparser.matching_func, eparser.alloc_func  # type: ignore
+                c_grammar, eparser.add_terminal_func, eparser.score_terminals_func, eparser.matching_func, eparser.alloc_func  # type: ignore
             )
             # Find the index of the default root nonterminal for this parser instance
             self._root_index = (
