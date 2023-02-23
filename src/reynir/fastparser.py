@@ -77,17 +77,21 @@ import operator
 from threading import Lock
 from functools import reduce
 
+from collections import defaultdict
+
 from .binparser import (
     BIN_Parser,
     BIN_Token,
+    BIN_Terminal,
     simplify_terminal,
     augment_terminal,
     Tok,
     TokenDict,
 )
 from .grammar import Grammar, GrammarError, Nonterminal, Terminal, Production
-from .settings import Settings
+from .settings import Settings, NounPreferences, Preferences
 from .glock import GlobalLock
+from .verbframe import VerbFrame
 
 # Import the CFFI wrapper module for the _eparser.*.so library
 # which is compiled from eparser.cpp (see eparser_build.py)
@@ -101,6 +105,12 @@ ffi_NULL: Any = cast(Any, ffi).NULL
 FlattenerType = Union[Tuple[Terminal, BIN_Token], Nonterminal]
 ProductionTuple = Tuple[Production, List[Optional["Node"]]]
 
+# BÍN categories ('fl') of person and entity names
+_NAMED_ENTITY_FL = frozenset(
+    ("ism", "erm", "gæl", "nafn", "föð", "móð", "ætt", "entity")
+)
+
+ScoreDict = Dict[int, Dict[BIN_Terminal, int]]
 
 class ParseJob:
 
@@ -111,9 +121,6 @@ class ParseJob:
     _seq = 0
     _jobs: Dict[int, "ParseJob"] = dict()
     _lock = Lock()
-
-    # Test variables for scoring.
-    _columns = []
 
     def __init__(
         self,
@@ -129,6 +136,8 @@ class ParseJob:
         self.grammar = grammar
         self.c_dict: Dict[Any, "Node"] = dict()  # Node pointer conversion dictionary
         self.matching_cache = matching_cache  # Token/terminal matching buffers
+        self.columns = []
+        self.scores: ScoreDict = dict()
 
     def matches(self, token_index: int, terminal_index: int) -> bool:
         """Convert the token reference from a 0-based token index
@@ -169,34 +178,297 @@ class ParseJob:
         return False
 
     def add_terminal_to_set_for_column(self, column_number: int, terminal_number: int) -> bool:
-        if(len(self._columns) == column_number):
-            self._columns.append(set())
-        elif(len(self._columns) > column_number + 1):
-            print("Column number was too high: {}. Current length is {}.".format(column_number, len(self._columns)))
+        if(len(self.columns) == column_number):
+            self.columns.append(set())
+        elif(len(self.columns) > column_number + 1):
+            print("Column number was too high: {}. Current length is {}.".format(column_number, len(self.columns)))
             return False
         
-        column:Set = self._columns[column_number]
+        column:Set = self.columns[column_number]
         column.add(terminal_number)
 
         print("Current number of terminals in column {} is {}".format(column_number, len(column)))
         return True
 
-    def start_scoring_terminals_for_column(self, column_number: int) -> bool:
+    def score_terminals_for_column(self, column_number: int) -> bool:
         """Start scoring terminals for a given token position / column. Note that the terminals' position
         is zero base as they are created by the SCANNER before before processing Earley items for the 
         Earley set for the given token position. So if we have the sentence 'Hún réð sig til vinnu á gúmmíbát.'
         then the terminals for 'Hún' are in the set for column 0 although the token position is number 1."""
-        # TODO: Implement later. First make sure everything is properly connected
-        print("Call successfully receive on the Python side.")
+
+        # First pass: for the token, find the possible terminals that
+        # can correspond to that token
+        terminals_set: Set[BIN_Terminal] = set() # RB: What is finals[i] and s in the original
+
+        # Second pass: find a (partial) ordering by scoring
+        # the terminal alternatives for each token
+        terminals_number_set:int = self.columns[column_number]
+        score_dict:Dict[BIN_Terminal, int] = dict() 
+        noun_prefs = NounPreferences.DICT
+
+        # Get the terminal numbers, get them from the grammar and convert to BIN_Terminals
+        for terminal_num in terminals_number_set:
+            bin_terminal = cast(BIN_Terminal, self.grammar.lookup_terminal(terminal_num))
+            score_dict[bin_terminal] = 0
+            terminals_set.add(bin_terminal)
+        
+        # This chunk is needed for only one part of the heuristics section
+        previous_terminals_set: Set[BIN_Terminal] = set() 
+        previous_terminals_numbers_set = None
+        if(column_number > 1):
+            previous_terminals_numbers_set = self.columns[column_number - 1]
+            for terminal_number_from_prev_set in previous_terminals_numbers_set:
+                bin_terminal = cast(BIN_Terminal, self.grammar.lookup_terminal(terminal_number_from_prev_set))
+                previous_terminals_set.add(bin_terminal)
+
+        if(len(terminals_number_set) <= 1):
+            # No ambiguity to resolve here
+            return True
+        
+        token = self.tokens[column_number] # TODO: Verify later that the token sequence is 0 based
+
+        # More than one terminal in the option set for the token at index i
+        # Calculate the relative scores
+        # Find out whether the first part of all the terminals are the same
+        same_first = len(set(terminal.first for terminal in terminals_set)) == 1
+        txt = txt_last = token.lower
+        composite = False
+        # Get the last part of a composite word (e.g. 'jaðar-áhrifin' -> 'áhrifin')
+        if (
+            token.is_word
+            and token.has_meanings
+            and "-" in token.meanings[0].ordmynd
+        ):
+            composite = True
+            txt_last = token.meanings[0].ordmynd.rsplit("-", maxsplit=1)[-1]
+
+        # No need to check preferences if the first parts of
+        # all possible terminals are equal
+        # Look up the preference ordering from GreynirPackage.conf, if any
+        prefs = None if same_first else Preferences.get(txt_last)
+        if prefs:
+            adj_worse: Dict[BIN_Terminal, int] = defaultdict(int)
+            adj_better: Dict[BIN_Terminal, int] = defaultdict(int)
+            for worse, better, factor in prefs:
+                for wt in terminals_set:
+                    if wt.first in worse:
+                        for bt in terminals_set:
+                            if wt is not bt and bt.first in better:
+                                if bt.is_literal:
+                                    # Literal terminal:
+                                    # be even more aggressive in promoting it
+                                    adj_w = -2 * factor
+                                    adj_b = +6 * factor
+                                else:
+                                    adj_w = -2 * factor
+                                    adj_b = +4 * factor
+                                adj_worse[wt] = min(adj_worse[wt], adj_w)
+                                adj_better[bt] = max(adj_better[bt], adj_b)
+            for wt, adj in adj_worse.items():
+                score_dict[wt] += adj
+            for bt, adj in adj_better.items():
+                score_dict[bt] += adj
+
+        # Apply heuristics to each terminal that potentially matches this token
+        for t in terminals_set:
+
+            if t.is_literal:
+                # Give a bonus for exact or semi-exact matches with
+                # literal terminals
+                score_dict[t] += 2
+
+            tfirst = t.first
+            if tfirst == "ao" or tfirst == "eo":
+                # Subtract from the score of all ao and eo
+                score_dict[t] -= 1
+            elif tfirst == "no":
+                if t.is_singular:
+                    # Add to singular nouns relative to plural ones
+                    score_dict[t] += 1
+                elif t.is_abbrev:
+                    # Punish abbreviations in favor of other more specific terminals
+                    score_dict[t] -= 1
+                if token.is_word and token.is_upper and token.t2:
+                    # Punish connection of normal noun terminal to an
+                    # uppercase word that can be a person or entity name and
+                    # would thus normally be matched with person or entity
+                    # terminal
+                    if any(m.fl in _NAMED_ENTITY_FL for m in token.meanings):
+                        # logging.info(
+                        #     "Punishing connection of {0} with 'no' terminal"
+                        #     .format(tokens[i].t1))
+                        score_dict[t] -= 5
+                # Noun priorities, i.e. between different genders
+                # of the same word form (for example "ára" which can refer to
+                # three stems with different genders)
+                if txt_last in noun_prefs and t.gender is not None:
+                    np = noun_prefs[txt_last].get(t.gender, 0)
+                    score_dict[t] += np
+            elif tfirst == "fs":
+                if t.has_variant("nf"):
+                    # Reduce the weight of the 'artificial' nominative prepositions
+                    # 'næstum', 'sem', 'um'
+                    # Make other cases outweigh the Nl_nf bonus of +4 (-2 -3 = -5)
+                    score_dict[t] -= 10
+                    if txt == "sem":
+                        # Further subtraction for 'sem:fs'_nf
+                        score_dict[t] -= 8
+                elif txt == "við" and t.has_variant("þgf"):
+                    # Smaller bonus for við + þgf (is rarer than við + þf)
+                    score_dict[t] += 1
+                elif txt == "sem" and t.has_variant("þf"):
+                    score_dict[t] -= 4
+                elif txt == "á" and t.has_variant("þgf"):
+                    # Larger bonus for á + þgf to resolve conflict with verb 'eiga'
+                    score_dict[t] += 4
+                else:
+                    # Else, give a bonus for each matched preposition
+                    score_dict[t] += 2
+            elif tfirst == "lo":
+                if composite:
+                    # If this is a composite word, it's less likely
+                    # to be an adjective, so give it a penalty
+                    score_dict[t] -= 3
+                # For adjectives ending with 'andi', we strongly prefer verbs in
+                # present participle (lýsingarháttur nútíðar)
+                if txt.endswith("andi") and any(
+                    (m.ordfl == "so" and m.beyging in {"LH-NT", "LHNT"})
+                    for m in token.meanings
+                ):
+                    score_dict[t] -= 50
+            elif tfirst == "so":
+                if t.num_variants > 0 and t.variant(0) in "012":
+                    # Consider verb arguments
+                    # Normally, we give a bonus for verb arguments:
+                    # the more matched, the better
+                    numcases = int(t.variant(0))
+                    adj = 2 * numcases
+                    # Apply score adjustments for verbs with particular
+                    # object cases, as specified by $score(n) pragmas in Verbs.conf
+                    # In the (rare) cases where there are conflicting scores,
+                    # apply the most positive adjustment
+                    adjmax: Optional[int] = None
+                    for m in token.meanings:
+                        if m.ordfl == "so":
+                            key = m.stofn + t.verb_cases
+                            # TODO: Remove the following cast when Pylance learns
+                            # to properly support @lru_cache()
+                            score = cast(Optional[int], VerbFrame.verb_score(key))
+                            if score is not None:
+                                if adjmax is None:
+                                    adjmax = score
+                                else:
+                                    adjmax = max(adjmax, score)
+                    score_dict[t] += adj + (adjmax or 0)
+                if t.is_bh:
+                    # Discourage 'boðháttur'
+                    score_dict[t] -= 4
+                elif t.is_sagnb:
+                    # We like sagnb and lh, it means that more
+                    # than one piece clicks into place
+                    score_dict[t] += 6
+                elif t.is_lh:
+                    # sagnb is preferred to lh, but vb (veik beyging) is discouraged
+                    if t.has_variant("vb"):
+                        score_dict[t] -= 2
+                    else:
+                        score_dict[t] += 3
+                elif t.is_lh_nt:
+                    score_dict[t] += 12  # Encourage LHNT rather than LO
+                elif t.is_mm:
+                    # Encourage mm forms. The encouragement should be better than
+                    # the score for matching a single case, so we pick so_0_mm
+                    # rather than so_1_þgf, for instance.
+                    score_dict[t] += 3
+                elif t.is_vh:
+                    # Encourage vh forms
+                    score_dict[t] += 2
+                if t.is_subj:
+                    # Give a small bonus for subject matches
+                    if t.has_variant("none"):
+                        # ... but a punishment for subj_none
+                        score_dict[t] -= 3
+                    else:
+                        score_dict[t] += 1
+                if t.is_nh:
+                    if (column_number > 0) and any(pt.first == "nhm" for pt in previous_terminals_set):
+                        # Give a bonus for adjacent nhm + so_nh terminals
+                        score_dict[t] += 4  # Prop up the verb terminal with the nh variant
+                        for pt in self.scores[column_number - 1].keys():
+                            if pt.first == "nhm":
+                                # Prop up the nhm terminal
+                                self.scores[column_number - 1][pt] += 2
+                                break
+                    if any(
+                        pt.first == "no" and pt.has_variant("ef") and pt.is_plural
+                        for pt in terminals_set
+                    ):
+                        # If this is a so_nh and an alternative no_ef_ft exists,
+                        # choose this one (for example, 'hafa', 'vera', 'gera',
+                        # 'fara', 'mynda', 'berja', 'borða')
+                        score_dict[t] += 4
+                if (column_number > 0) and token.is_upper:
+                    # The token is uppercase and not at the start of a sentence:
+                    # discourage it from being a verb
+                    score_dict[t] -= 4
+            elif tfirst == "tala":
+                if t.has_variant("ef"):
+                    # Try to avoid interpreting plain numbers as possessive phrases
+                    score_dict[t] -= 4
+            elif tfirst == "person":
+                if t.has_variant("nf"):
+                    # Prefer person names in the nominative case
+                    score_dict[t] += 2
+            elif tfirst == "sérnafn":
+                if not token.t2:
+                    # If there are no BÍN meanings, we had no choice but
+                    # to use sérnafn, so alleviate some of the penalty given
+                    # by the grammar
+                    score_dict[t] += 12
+                else:
+                    # BÍN meanings are available: discourage this
+                    # print(f"Discouraging sérnafn {txt}, "
+                    #     "BÍN meanings are {tokens[i].t2}")
+                    score_dict[t] -= 10
+                    if column_number == 0:  # RB: In original this was i == w.start but since we are not
+                                            # working with SPPF afterwards there is no way to split
+                                            # up sentences.
+                        # First token in sentence, and we have BÍN meanings:
+                        # further discourage this
+                        score_dict[t] -= 6
+            elif tfirst == "fyrirtæki":
+                # We encourage company names to be interpreted as such,
+                # so we give company abbreviations ('hf.', 'Corp.', 'Limited')
+                # a high priority
+                score_dict[t] += 24
+            elif tfirst == "st" or (tfirst == "sem" and t.colon_cat == "st"):
+                if txt == "sem":
+                    # Discourage "sem" as a pure conjunction (samtenging)
+                    # (it does not get a penalty when occurring as
+                    # a connective conjunction, 'stt')
+                    score_dict[t] -= 6
+            elif tfirst == "abfn":
+                # If we have number and gender information with the reflexive
+                # pronoun, that's good: encourage it
+                score_dict[t] += 6 if t.num_variants > 1 else 2
+            elif tfirst == "gr":
+                # Encourage separate definite article rather than pronoun
+                score_dict[t] += 2
+            elif tfirst == "nhm":
+                # Encourage the infinitive
+                score_dict[t] += 4
+
+        self.scores[column_number] = score_dict
+
         return True
     
     def get_terminals_for_column(self, column_number: int) -> Any:
-        print("Get the terminals for column {}. Number terminals: {}.".format(column_number, len(self._columns[column_number])))
-        int_array_length = len(self._columns[column_number]) + 1
+        print("Get the terminals for column {}. Number terminals: {}.".format(column_number, len(self.columns[column_number])))
+        int_array_length = len(self.columns[column_number]) + 1
         int_array = ffi.new("unsigned int[{}]".format(int_array_length))
-        int_array[0] = len(self._columns[column_number])
-        for i in range(len(self._columns[column_number])):
-            int_array[i+1] = list(self._columns[column_number])[i]
+        int_array[0] = len(self.columns[column_number])
+        for i in range(len(self.columns[column_number])):
+            int_array[i+1] = list(self.columns[column_number])[i]
         return int_array
 
     @classmethod
@@ -240,7 +512,7 @@ class ParseJob:
     @classmethod
     def start_score_terminals_for_column(cls, handle: int, column_number: int):
         """Dispatch the request to the correct parse job"""
-        return cls._jobs[handle].start_scoring_terminals_for_column(column_number)
+        return cls._jobs[handle].score_terminals_for_column(column_number)
 
 # Declare CFFI callback functions to be called from the C++ code
 # See: https://cffi.readthedocs.io/en/latest/using.html#extern-python-new-style-callbacks
