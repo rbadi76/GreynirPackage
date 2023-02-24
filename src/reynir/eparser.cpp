@@ -1027,6 +1027,27 @@ BOOL Node::getScoreFlag()
    return this->m_bHasScore;
 }
 
+BOOL Node::operator< (Node& otherNode)
+{
+   INT length = 0;
+	INT other_length = 0;
+	
+	length = this->m_label.getJ() - this->m_label.getJ();
+	other_length = otherNode.m_label.getJ() - otherNode.m_label.getI();
+
+	if (length < other_length)
+		return true;
+	else if (length > other_length)
+		return false;
+	else
+	{
+		if (this->m_label.m_iNt < otherNode.m_label.m_iNt)
+			return true;
+		else
+			return false;
+	}
+}
+
 NodeDict::NodeDict(void)
    : m_pHead(NULL)
 {

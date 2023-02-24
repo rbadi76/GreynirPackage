@@ -302,6 +302,8 @@ private:
 
    void _dump(Grammar*, UINT nIndent);
 
+   BOOL operator< (Node& otherNode);
+
 protected:
 
 public:
