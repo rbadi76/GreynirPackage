@@ -45,6 +45,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
+#include <set>
 
 
 // Assert macro
@@ -302,8 +303,6 @@ private:
 
    void _dump(Grammar*, UINT nIndent);
 
-   BOOL operator< (Node& otherNode);
-
 protected:
 
 public:
@@ -337,6 +336,8 @@ public:
 
    static UINT numCombinations(Node*);
 
+   BOOL operator< (const Node& otherNode) const;
+
 };
 
 
@@ -366,6 +367,7 @@ private:
    AllocFunc m_pAllocFunc;
    AddTerminalToSetFunc m_pAddTerminalToSetFunc;
    StartScoringTerminalsForColumnFunc m_pStartScoringTerminalsForColumnFunc;
+   std::set <Node> m_topNodesToTraverse;
 
    void push(UINT nHandle, State*, Column*, State*&, StateChunk*);
 

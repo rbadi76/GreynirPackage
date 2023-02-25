@@ -1027,13 +1027,13 @@ BOOL Node::getScoreFlag()
    return this->m_bHasScore;
 }
 
-BOOL Node::operator< (Node& otherNode)
+BOOL Node::operator< (const Node& otherNode) const
 {
    INT length = 0;
 	INT other_length = 0;
 	
-	length = this->m_label.getJ() - this->m_label.getJ();
-	other_length = otherNode.m_label.getJ() - otherNode.m_label.getI();
+	length = this->getLabel().getJ() - this->getLabel().getI();
+	other_length = otherNode.getLabel().getJ() - otherNode.getLabel().getI();
 
 	if (length < other_length)
 		return true;
@@ -1041,7 +1041,7 @@ BOOL Node::operator< (Node& otherNode)
 		return false;
 	else
 	{
-		if (this->m_label.m_iNt < otherNode.m_label.m_iNt)
+		if (this->getLabel().getSymbol() < otherNode.getLabel().getSymbol())
 			return true;
 		else
 			return false;
@@ -1168,6 +1168,20 @@ Node* Parser::makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, Column
    }
    Label label(iNtB, nDot, pProdLabel, nStart, nEnd);
    Node* pY = ndV.lookupOrAdd(label);
+   // TODO: Add the parent node pY to the set of top nodes which will start traversing into later
+   this->m_topNodesToTraverse.insert(*pY);
+   printf("Node added to set. Current contents:\n");
+   for (Node i : this->m_topNodesToTraverse)
+   {
+      printf("(%d, %d, %d)\n", i.getLabel().getSymbol(), i.getLabel().getI(), i.getLabel().getJ());
+   }
+   if(pW) this->m_topNodesToTraverse.erase(*pW);
+   if(pV) this->m_topNodesToTraverse.erase(*pV);
+   printf("Children removed if existing. Current contents:\n");
+   for (Node i : this->m_topNodesToTraverse)
+   {
+      printf("(%d, %d, %d)\n", i.getLabel().getSymbol(), i.getLabel().getI(), i.getLabel().getJ());
+   }
    pY->addFamily(pProd, pW, pV, i, nSymbolV, nSymbolW, pState, this->m_pAddTerminalToSetFunc, nHandle); // pW may be NULL
    return pY;
 }
