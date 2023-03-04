@@ -887,7 +887,7 @@ void Node::addFamily(Production* pProd, Node* pW, Node* pV, UINT i, INT nSymbolV
          Label labelW(nSymbolW, 0, NULL, tokenLabelW.getI(), tokenLabelW.getJ());
          Node* terminalNodeW = new Node(labelW);
          p->p1 = terminalNodeW;
-         printf("addFamily pW - Added terminal %d to terminals set for column %d\n", nSymbolW, i-1);
+         //printf("addFamily pW - Added terminal %d to terminals set for column %d\n", nSymbolW, i-1);
       }
       else
       {
@@ -911,7 +911,7 @@ void Node::addFamily(Production* pProd, Node* pW, Node* pV, UINT i, INT nSymbolV
          Label labelV(nSymbolV, 0, NULL, tokenLabelV.getI(), tokenLabelV.getJ());
          Node* terminalNodeV = new Node(labelV);
          p->p2 = terminalNodeV;
-         printf("addFamily pV - Added terminal %d to terminals set for column %d\n", nSymbolV, i);
+         //printf("addFamily pV - Added terminal %d to terminals set for column %d\n", nSymbolV, i);
       }
       else
       {
@@ -923,7 +923,7 @@ void Node::addFamily(Production* pProd, Node* pW, Node* pV, UINT i, INT nSymbolV
       p->p2 = pV;
    }
    
-   if(wasChild) Helper::printProduction(pState); // TODO: Just used for debugging - remove later, including pState parameter.
+   //if(wasChild) Helper::printProduction(pState); // TODO: Just used for debugging - remove later, including pState parameter.
 
    if (pW)
       pW->addRef();
@@ -1027,27 +1027,6 @@ BOOL Node::getScoreFlag()
    return this->m_bHasScore;
 }
 
-BOOL Node::operator< (const Node& otherNode) const
-{
-   INT length = 0;
-	INT other_length = 0;
-	
-	length = this->getLabel().getJ() - this->getLabel().getI();
-	other_length = otherNode.getLabel().getJ() - otherNode.getLabel().getI();
-
-	if (length < other_length)
-		return true;
-	else if (length > other_length)
-		return false;
-	else
-	{
-		if (this->getLabel().getSymbol() < otherNode.getLabel().getSymbol())
-			return true;
-		else
-			return false;
-	}
-}
-
 NodeDict::NodeDict(void)
    : m_pHead(NULL)
 {
@@ -1089,6 +1068,100 @@ void NodeDict::reset(void)
       p = pNext;
    }
    this->m_pHead = NULL;
+}
+
+// NodeDict2 is only used for the scoring feature. It should not add or delete references to the nodes.
+
+NodeDict2::NodeDict2(void)
+   : m_pHead(NULL), m_pCurrent(NULL), m_length(0)
+{
+}
+
+NodeDict2::~NodeDict2(void)
+{
+   this->reset();
+}
+
+void NodeDict2::lookupOrAdd(Node* pNode)
+{
+   NdEntry2* p = this->m_pHead;
+   while (p) {
+      if (p->pNode->hasLabel((*pNode).getLabel()))
+         return;
+      p = p->pNext;
+   }
+   // Not found: add to the dict
+   p = new NdEntry2();
+   p->pNode = pNode;
+   p->pNext = this->m_pHead;
+   this->m_pHead = p;
+   this->m_length++;
+   return;
+}
+
+/*
+   Returns the next node in the dictionary. Returns NULL if it is at the end and then starts
+   at the beginning if called again.
+*/
+Node* NodeDict2::next()
+{
+   if(this->m_pCurrent == NULL) // We are at the beginning or NodeDict2 is empty
+      this->m_pCurrent = this->m_pHead; // In case of empty then m_pHead will be NULL also
+   else
+   {
+      this->m_pCurrent = this->m_pCurrent->pNext;
+   }
+   if(this->m_pCurrent == NULL) return NULL; // NodeDict2 is empty or at the end
+   else return this->m_pCurrent->pNode;
+}
+
+// Just deletes the reference to the node in the dictionary, not the actual node.
+BOOL NodeDict2::findAndDelete(Node* pNode)
+{
+   NdEntry2* p = this->m_pHead;
+   if(p->pNode->hasLabel((*pNode).getLabel()))
+   {
+      this->m_pHead = p->pNext;
+      delete p;
+      this->m_length--;
+      return true;
+   }
+   else
+   {
+      NdEntry2* lastEntry = p;
+      p = p->pNext;
+      while (p) {
+         if(p->pNode->hasLabel((*pNode).getLabel()))
+         {
+            NdEntry2* pNext = p->pNext;
+            delete p;
+            lastEntry->pNext = pNext;
+            this->m_length--;
+            return true;
+         }
+         lastEntry = p;
+         p = p->pNext;
+      }
+
+      return false; // Node was not found, return false;
+   }
+}
+
+void NodeDict2::reset(void)
+{
+   NdEntry2* p = this->m_pHead;
+   while (p) {
+      NdEntry2* pNext = p->pNext;
+      delete p;
+      p = pNext;
+   }
+   this->m_pHead = NULL;
+   this->m_length = 0;
+}
+
+UINT NodeDict2::getLength()
+{
+   return this->m_length;
 }
 
 
@@ -1168,20 +1241,16 @@ Node* Parser::makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, Column
    }
    Label label(iNtB, nDot, pProdLabel, nStart, nEnd);
    Node* pY = ndV.lookupOrAdd(label);
-   // TODO: Add the parent node pY to the set of top nodes which will start traversing into later
-   this->m_topNodesToTraverse.insert(*pY);
-   printf("Node added to set. Current contents:\n");
-   for (Node i : this->m_topNodesToTraverse)
-   {
-      printf("(%d, %d, %d)\n", i.getLabel().getSymbol(), i.getLabel().getI(), i.getLabel().getJ());
-   }
-   if(pW) this->m_topNodesToTraverse.erase(*pW);
-   if(pV) this->m_topNodesToTraverse.erase(*pV);
-   printf("Children removed if existing. Current contents:\n");
-   for (Node i : this->m_topNodesToTraverse)
-   {
-      printf("(%d, %d, %d)\n", i.getLabel().getSymbol(), i.getLabel().getI(), i.getLabel().getJ());
-   }
+   
+   // Add the parent node pY to the set / dictionary of top nodes which will start traversing into later
+   this->m_topNodesToTraverse.lookupOrAdd(pY);
+
+   // Add the child nodes pV and/or pW to the set / dictionary of child Nodes which we will use to delete from the 
+   // set of top nodes later. When traversing the nodes we will only interested in traversing top nodes and can therefore 
+   // discard all child nodes.
+   if(pW) this->m_childNodesToDelete.lookupOrAdd(pW);
+   if(pV) this->m_childNodesToDelete.lookupOrAdd(pV);
+
    pY->addFamily(pProd, pW, pV, i, nSymbolV, nSymbolW, pState, this->m_pAddTerminalToSetFunc, nHandle); // pW may be NULL
    return pY;
 }
@@ -1203,8 +1272,8 @@ void Parser::push(UINT nHandle, State* pState, Column* pE, State*& pQ, StateChun
       pQ = pState;
       Production* prod = pState->getProd();
       INT dot = pState->getDot();
-      printf("Added to Q state with terminal %d\n", (*prod)[dot]);
-      Helper::printProduction(pState);
+      //printf("Added to Q state with terminal %d\n", (*prod)[dot]);
+      //Helper::printProduction(pState);
       return;
    }
    // We did not actually push the state; discard it
@@ -1396,12 +1465,24 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
          pQ = psNext;
       }
 
-      // TODO: Add terminal scoring here
+      // Terminals scored
       if(i > 0)
       {
          printf("Starting to score for column %d\n", i-1);
          this->m_pStartScoringTerminalsForColumnFunc(nHandle, i-1);
       }
+
+      // Delete child nodes
+      //printf("Before delete. Length of m_topNodesToTraverse: %u, Length of m_childNodesToDelete: %u\n", this->m_topNodesToTraverse.getLength(),
+      //   this->m_childNodesToDelete.getLength());
+
+      while(Node* pNode = this->m_childNodesToDelete.next())
+      {
+         this->m_topNodesToTraverse.findAndDelete(pNode);
+      }
+
+      // printf("After delete. Length of m_topNodesToTraverse: %u, Length of m_childNodesToDelete: %u\n", this->m_topNodesToTraverse.getLength(),
+      //   this->m_childNodesToDelete.getLength());
 
       // Clean up reference to pV created above
       if (pV)
@@ -1609,8 +1690,8 @@ void Helper::printProduction(State* pState)
 void Helper::printProduction(Production* pProd, INT lhs, INT nDot)
 {
    std::vector<INT> vProductions;
-   INT prodLength = pProd->getLength();
-   for(int i = 0; i < prodLength; i++)
+   UINT prodLength = pProd->getLength();
+   for(UINT i = 0; i < prodLength; i++)
    {
       vProductions.push_back((*pProd)[i]);
    }

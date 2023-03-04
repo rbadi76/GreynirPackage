@@ -187,7 +187,7 @@ class ParseJob:
         column:Set = self.columns[column_number]
         column.add(terminal_number)
 
-        print("Current number of terminals in column {} is {}".format(column_number, len(column)))
+        # print("Current number of terminals in column {} is {}".format(column_number, len(column)))
         return True
 
     def score_terminals_for_column(self, column_number: int) -> bool:

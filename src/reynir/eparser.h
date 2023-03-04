@@ -272,6 +272,15 @@ public:
       return this->m_nJ;
    }
 
+   Production* getProduction()
+   {
+      return this->m_pProd;
+   }
+
+   UINT getDot()
+   {
+      return this->m_nDot;
+   }
 };
 
 // Callback function to Python to add a terminal to a set for a specific column / Earley set.
@@ -340,6 +349,35 @@ public:
 
 };
 
+class NodeDict2 {
+
+public:
+
+   NodeDict2(void);
+   ~NodeDict2(void);
+
+   struct NdEntry2 {
+      Node* pNode;
+      NdEntry2* pNext;
+   };
+
+   Node* next();
+   
+   void lookupOrAdd(Node* pNode);
+
+   BOOL findAndDelete(Node* pNode);
+
+   void reset(void);
+
+   UINT getLength();
+
+private:
+   
+   NdEntry2* m_pHead;
+   NdEntry2* m_pCurrent;
+   UINT m_length;
+
+};
 
 // Token-terminal matching function
 typedef BOOL (*MatchingFunc)(UINT nHandle, UINT nToken, UINT nTerminal);
@@ -367,7 +405,8 @@ private:
    AllocFunc m_pAllocFunc;
    AddTerminalToSetFunc m_pAddTerminalToSetFunc;
    StartScoringTerminalsForColumnFunc m_pStartScoringTerminalsForColumnFunc;
-   std::set <Node> m_topNodesToTraverse;
+   NodeDict2 m_topNodesToTraverse;
+   NodeDict2 m_childNodesToDelete;
 
    void push(UINT nHandle, State*, Column*, State*&, StateChunk*);
 
