@@ -430,9 +430,7 @@ class ParseJob:
                     # print(f"Discouraging sérnafn {txt}, "
                     #     "BÍN meanings are {tokens[i].t2}")
                     score_dict[t] -= 10
-                    if column_number == 0:  # RB: In original this was i == w.start but since we are not
-                                            # working with SPPF afterwards there is no way to split
-                                            # up sentences.
+                    if column_number == 0:
                         # First token in sentence, and we have BÍN meanings:
                         # further discourage this
                         score_dict[t] -= 6

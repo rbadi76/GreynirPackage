@@ -45,7 +45,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
-#include <set>
 
 
 // Assert macro
@@ -345,6 +344,11 @@ public:
 
    static UINT numCombinations(Node*);
 
+   // TODO: It might be an idea to hold on to this function and use it along with a set
+   // implementation for the Node class if it turns out a really must sort the top nodes.
+   // In that case I can feed the Nodes in Parser.m_topNodesToTraverse after the child nodes have 
+   // been deleted. If it turns out I don't then delete this. Remember to add an include statement
+   // back for set.
    BOOL operator< (const Node& otherNode) const;
 
 };

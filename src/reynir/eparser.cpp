@@ -48,7 +48,6 @@
 #include <stdint.h>
 #include <assert.h>
 #include <time.h>
-#include <set>
 #include <vector>
 
 #include "eparser.h"
@@ -1209,11 +1208,8 @@ Node* Parser::makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, Column
    UINT nDot = pState->getDot() + 1;
    Production* pProd = pState->getProd();
    UINT nLen = pProd->getLength();
-   INT temp = 0;
    if (nDot == 1 && nLen >= 2)
-   {
       return pV;
-   }
 
    INT iNtB = pState->getNt();
    UINT nStart = pState->getStart();
