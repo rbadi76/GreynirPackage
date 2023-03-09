@@ -299,12 +299,12 @@ private:
       Node* p1;
       Node* p2;
       FamilyEntry* pNext;
+      INT* pScore;
    };
 
    Label m_label;
    FamilyEntry* m_pHead;
    UINT m_nRefCount;
-   INT m_nScore;
    BOOL m_bHasScore = false;
 
    static AllocCounter ac;
@@ -323,14 +323,6 @@ public:
    void delRef(void);
 
    void addFamily(Production*, Node* pW, Node* pV, UINT i, INT nSymbolV, INT nSymbolW, State* pState, AddTerminalToSetFunc addTerminalToSetFunc, INT nHandle);
-
-   void setScore(INT score);
-
-   INT getScore();
-
-   void setScoreFlag();
-
-   BOOL getScoreFlag();
 
    BOOL hasLabel(const Label& label) const
       { return this->m_label == label; }
@@ -351,6 +343,9 @@ public:
    // back for set.
    BOOL operator< (const Node& otherNode) const;
 
+   INT* getScore();
+
+   void doScore(UINT maxPosition);
 };
 
 class NodeDict2 {

@@ -1006,24 +1006,99 @@ UINT Node::numCombinations(Node* pNode)
    return nComb == 0 ? 1 : nComb;
 }
 
-void Node::setScore(INT score)
+// Gets a pointer to the score if it exists, NULL otherwise.
+INT* Node::getScore()
 {
-   this->m_nScore = score;
+   // If this is a terminal
+   if(this->m_label.getSymbol() >= 0) // TODO: Not sure about epsilons, i.e. if this should be > 0 rather
+   {
+      // TODO: call method to get score for terminal
+   }
+   // if this is a non-terminal and it has a score already
+   else if(this->m_label.getSymbol() < 0 && this->m_bHasScore)
+      return this->m_pHead->pScore; // return the score of remaining family / packed node
+   else return NULL; // otherwise we do not have a score yet so we return NULL.
 }
 
-INT Node::getScore()
+void Node::doScore(UINT maxPosition)
 {
-   return this->m_nScore;
-}
+   if(this->m_label.getSymbol() < 0 && !this->m_bHasScore && this->m_label.m_nI < maxPosition)
+   {
+      FamilyEntry* p = this->m_pHead;
+      while(p)
+      {
+         if(p->p1)
+         {
+            p->p1->doScore(maxPosition);
+         }
+         if(p->p2)
+         {
+            p->p2->doScore(maxPosition);
+         }
+         
+         // Get scores for each child if it exists
+         INT* p1Score = p->p1->getScore();
+         INT* p2Score = p->p2->getScore();
+         if(p->p1 && p->p2 && p1Score && p2Score)
+         {
+            // we can add the scores for each and give the family a score which is their sum.
+            p->pScore = new INT(*p1Score + *p2Score);                                          
+         }
+         else if(p->p1 == NULL && p->p2 && p2Score)
+         {
+            p->pScore = p2Score;
+         }
+         p = p->pNext;
+      }
+      // Loop again through all families. If they have all been scored we can set
+      // this->m_bHasScore to true and drop lower scoring families.
+      p = this->m_pHead;
+      BOOL anyUnscored = false;
+      FamilyEntry* highestScoringFE = NULL;
+      INT highestScore = 0;
+      while(p)
+      {
+         if(p->pScore == NULL) 
+         {  
+            anyUnscored = true;
+            break;
+         }
+         else
+         {
+            // TODO: Think about when there is a tie and how do resolve that non-deterministically
+            // as per suggestion from Miðeind.
+            if(*p->pScore > highestScore)
+            {
+               highestScore = *p->pScore;
+               highestScoringFE = p;
+            }
+         }
+         p = p->pNext;
+      }
+      if(!anyUnscored) 
+      {
+         this->m_bHasScore = true;
 
-void Node::setScoreFlag()
-{
-   this->m_bHasScore = true;
-}
-
-BOOL Node::getScoreFlag()
-{
-   return this->m_bHasScore;
+         // Throw away lower scoring families
+         p = this->m_pHead;
+         while (p) {
+            FamilyEntry* pNext = p->pNext;
+            if(highestScoringFE == p)
+            {
+               this->m_pHead = p;
+            }
+            else
+            {
+               if (p->p1)
+                  p->p1->delRef();
+               if (p->p2)
+                  p->p2->delRef();
+               delete p;
+            }
+            p = pNext;
+         }
+      }  
+   }
 }
 
 NodeDict::NodeDict(void)
