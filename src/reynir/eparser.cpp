@@ -153,7 +153,7 @@ public:
 class Column {
 
    // An Earley column
-   // A Parser cointains one Column for each token in the input, plus a sentinel
+   // A Parser contains one Column for each token in the input, plus a sentinel
 
 friend class AllocReporter;
 
@@ -177,6 +177,15 @@ private:
    BOOL m_bNeedsRelease; // Does the matching cache need to be explicitly released?
    HashBin m_aHash[HASH_BINS]; // The hash bin array
    UINT m_nEnumBin; // Round robin used during enumeration of states
+   
+   BenOrPsiDict m_oBenDict; // Dictionary of states / Earley items conforming to type BΣN (for scoring)
+   UINT m_nLength; // The number of items in the Earley set / column
+   BOOL m_bAreTerminalsScored; // Indicates if the terminals for this column have been scored yet
+   BenOrPsiDict* m_pNonPsiDict; // Dictionary of states used as a HELPER or TEMPORARY LIST to find items to conforming to type ψ (small psi)
+   BenOrPsiDict** m_pPsiDicts; // Dictionary of states / Earley items conforming to type ψ (small psi) that point, perhaps indirectly, 
+                                      // to BΣN items within previous and current Earley sets / column which have propagated to the current Earley set / column.
+
+   BOOL m_bDelayTerminalScoring;
 
    static AllocCounter ac;
    static AllocCounter acMatches;
@@ -203,6 +212,18 @@ public:
    State* getNtHead(INT iNt) const;
 
    BOOL matches(UINT nHandle, UINT nTerminal) const;
+
+   BOOL areTerminalsScored();
+   void setTerminalsScored();
+   UINT getLength();
+   BOOL correspondingBenStateExists(INT nt, UINT h);
+   void addToNonPsiDict(State* pState);
+   void addToPsiDicts(State* pState, UINT colNum);
+   BenOrPsiDict* getNonPsiDictPointer();
+   BenOrPsiDict* getPsiDicts(UINT colNum);
+   BOOL shouldTerminalScoringBeDelayed();
+   void setTerminalScoringShouldBeDelayed(BOOL val);
+   void initializePsiSets(UINT cols);
 };
 
 class HNode {
@@ -270,7 +291,7 @@ public:
    NodeDict(void);
    ~NodeDict(void);
 
-   Node* lookupOrAdd(const Label&);
+   Node* lookupOrAdd(const Label&, Parser* pParser, UINT nHandle);
 
    void reset(void);
 
@@ -462,7 +483,8 @@ Column::Column(Parser* pParser, UINT nToken)
       m_pNtStates(NULL),
       m_pMatchingFunc(pParser->getMatchingFunc()),
       m_abCache(NULL), m_bNeedsRelease(false),
-      m_nEnumBin(0)
+      m_nEnumBin(0),
+      m_bAreTerminalsScored(false)
 {
    Column::ac++;
    ASSERT(this->m_pMatchingFunc != NULL);
@@ -472,6 +494,9 @@ Column::Column(Parser* pParser, UINT nToken)
    memset(this->m_pNtStates, 0, nNonterminals * sizeof(State*));
    // Initialize the hash bins to zero
    memset(this->m_aHash, 0, sizeof(HashBin) * HASH_BINS);
+
+   this->m_oBenDict = BenOrPsiDict();
+   this->m_pNonPsiDict = new BenOrPsiDict();
 }
 
 Column::~Column(void)
@@ -494,6 +519,10 @@ Column::~Column(void)
    }
    // Delete array of linked lists by nonterminal at prod[dot]
    delete [] this->m_pNtStates;
+
+   // Destroy the PsiDicts
+   delete [] this->m_pPsiDicts;
+
    // Delete matching cache and seen array, if still allocated
    this->stopParse();
    Column::ac--;
@@ -551,6 +580,18 @@ BOOL Column::addState(State* p)
       p->setNtNext(psHead);
       psHead = p;
    }
+   // If we are adding state on the form BΣN, add it to the BenDict.
+   // Note! Since Greynir departs from Scott's original paper by creating a token node just before the SCANNER which is 0 based, rather than 1 based, we must 
+   // add 1 to the symbol for this to match correctly
+   if(p->getNode() != NULL && p->getNode()->getLabel().getSymbol() + 1 == this->getToken() && p->prodDot() < 0)
+   {
+      if(this->m_oBenDict.lookupOrAdd(p))
+      {
+         printf("BΣN item added for token position %u. Node's symbol is %d, prodDot is: %d, PR is:\n", this->m_nToken, p->getNode()->getLabel().getSymbol() + 1, p->prodDot());
+         Helper::printProduction(p);
+      }
+   }
+   this->m_nLength++;
    return true;
 }
 
@@ -611,6 +652,78 @@ BOOL Column::matches(UINT nHandle, UINT nTerminal) const
    // Mark our cache
    this->m_abCache[nTerminal] = b ? (BYTE)0x81 : (BYTE)0x80;
    return b;
+}
+
+BOOL Column::areTerminalsScored()
+{
+   return this->m_bAreTerminalsScored;
+}
+
+void Column::setTerminalsScored()
+{
+   this->m_bAreTerminalsScored = true;
+}
+
+UINT Column::getLength()
+{
+   return this->m_nLength;
+}
+
+BOOL Column::correspondingBenStateExists(INT nt, UINT h)
+{
+   if(this->m_oBenDict.getHead() == NULL) return false;
+
+   this->m_oBenDict.resetCurrentToHead();
+
+   while(State* pState = this->m_oBenDict.next())
+   {
+      if(nt == pState->prodDot() && h == this->getToken()) return true;
+   }
+   return false;
+}
+
+void Column::addToNonPsiDict(State* pState)
+{
+   this->m_pNonPsiDict->lookupOrAdd(pState);
+}
+
+BOOL Column::shouldTerminalScoringBeDelayed()
+{
+   return this->m_bDelayTerminalScoring;
+}
+
+void Column::setTerminalScoringShouldBeDelayed(BOOL val)
+{
+   this->m_bDelayTerminalScoring = val;
+}
+
+void Column::initializePsiSets(UINT cols)
+{
+   if(cols == 0) cols = 1;
+   this->m_pPsiDicts = new BenOrPsiDict* [cols + 1];
+   for(UINT j = 0; j < cols + 1; j++)
+   {
+      this->m_pPsiDicts[j] = new BenOrPsiDict();
+   }
+}
+
+BenOrPsiDict* Column::getNonPsiDictPointer()
+{
+   return this->m_pNonPsiDict;
+}
+
+void Column::addToPsiDicts(State* pState, UINT nColNum)
+{
+   // We do not use PsiDict for column 0 but initialize it for simplicities' sake
+   // (otherwise we'll have to deal with lots on null reference errors)
+   this->m_pPsiDicts[nColNum]->lookupOrAdd(pState);
+}
+
+BenOrPsiDict* Column::getPsiDicts(UINT nColNum)
+{
+   // We do not use PsiDict for column 0 but initialize it for simplicities' sake
+   // (otherwise we'll have to deal with lots on null reference errors)
+   return this->m_pPsiDicts[nColNum];
 }
 
 class File {
@@ -826,8 +939,10 @@ const WCHAR* Grammar::nameOfNt(INT iNt) const
 
 AllocCounter Node::ac;
 
-Node::Node(const Label& label)
-   : m_label(label), m_pHead(NULL), m_nRefCount(1)
+// Node constructor now needs a refrence to the parser and the handle for the terminal scoring feature
+// to be able to call the necessary functions on the Python side.
+Node::Node(const Label& label, Parser* parser, UINT nHandle)
+   : m_label(label), m_pHead(NULL), m_nRefCount(1), m_pParser(parser), m_nHandle(nHandle)
 {
    Node::ac++;
 }
@@ -856,7 +971,7 @@ void Node::delRef(void)
 }
 
 // TODO: Remove pState later as it is only used for debugging
-void Node::addFamily(Production* pProd, Node* pW, Node* pV, UINT i, INT nSymbolV, INT nSymbolW, State* pState, AddTerminalToSetFunc fpAddTerminalToSetFunc, INT nHandle)
+void Node::addFamily(Production* pProd, Node* pW, Node* pV, UINT i, INT nSymbolV, INT nSymbolW, State* pState, AddTerminalToSetFunc fpAddTerminalToSetFunc, INT nHandle, Parser* parser)
 {
    // pW may be NULL, or both may be NULL if epsilon
    FamilyEntry* p = this->m_pHead;
@@ -881,16 +996,18 @@ void Node::addFamily(Production* pProd, Node* pW, Node* pV, UINT i, INT nSymbolV
       if(nChildSymbolW >= 0) // Note that the token symbol can be 0 whereas terminal symbol would be not (unless it is an epsilon terminal)
       {
          wasChild = true;
-         bool success = fpAddTerminalToSetFunc(nHandle, i-1, nSymbolW);
+         bool success = fpAddTerminalToSetFunc(nHandle, tokenLabelW.getI(), nSymbolW);
          if(!success) printf("fpAddTerminalToSetFunc returned False for node pW. This should not happen.\n");
          Label labelW(nSymbolW, 0, NULL, tokenLabelW.getI(), tokenLabelW.getJ());
-         Node* terminalNodeW = new Node(labelW);
-         p->p1 = terminalNodeW;
-         //printf("addFamily pW - Added terminal %d to terminals set for column %d\n", nSymbolW, i-1);
+         Node* terminalNodeW = new Node(labelW, parser, nHandle);
+         p->p1 = terminalNodeW; // No need to add reference here as it happens automatically when the new terminal node is created here above.
+         // printf("addFamily pW - Added terminal %d to terminals set for column/getI: %u. getJ: %u, i: %u\n", nSymbolW, tokenLabelW.getI(), tokenLabelW.getJ(), i);
+         Helper::printProduction(pState);
       }
       else
       {
          p->p1 = pW;
+         pW->addRef();
       }
    }
    else
@@ -902,19 +1019,22 @@ void Node::addFamily(Production* pProd, Node* pW, Node* pV, UINT i, INT nSymbolV
    {
       Label tokenLabelV = pV->getLabel();
       INT nChildSymbolV = tokenLabelV.getSymbol(); // nChildSymbol will only be different from nProdSymbol in the case of a token/terminal
+
       if(nChildSymbolV >= 0)
       {
          wasChild = true;
-         bool success = fpAddTerminalToSetFunc(nHandle, i, nSymbolV);
+         bool success = fpAddTerminalToSetFunc(nHandle, tokenLabelV.getI(), nSymbolV);
          if(!success) printf("fpAddTerminalToSetFunc returned False for node pV. This should not happen.\n");
          Label labelV(nSymbolV, 0, NULL, tokenLabelV.getI(), tokenLabelV.getJ());
-         Node* terminalNodeV = new Node(labelV);
-         p->p2 = terminalNodeV;
-         //printf("addFamily pV - Added terminal %d to terminals set for column %d\n", nSymbolV, i);
+         Node* terminalNodeV = new Node(labelV, parser, nHandle);
+         p->p2 = terminalNodeV; // No need to add reference here as it happens automatically when the new terminal node is created here above.
+         // printf("addFamily pV - Added terminal %d to terminals set for column/getI: %u, getJ: %u, i: %u.\n", nSymbolV, tokenLabelV.getI(), tokenLabelV.getJ(), i);
+         Helper::printProduction(pState);
       }
       else
       {
          p->p2 = pV;
+         pV->addRef();
       }
    }
    else
@@ -922,12 +1042,7 @@ void Node::addFamily(Production* pProd, Node* pW, Node* pV, UINT i, INT nSymbolV
       p->p2 = pV;
    }
    
-   //if(wasChild) Helper::printProduction(pState); // TODO: Just used for debugging - remove later, including pState parameter.
-
-   if (pW)
-      pW->addRef();
-   if (pV)
-      pV->addRef();
+   if(wasChild) Helper::printProduction(pState); // TODO: Just used for debugging - remove later, including pState parameter.
    p->pNext = this->m_pHead;
    this->m_pHead = p;
 }
@@ -1007,59 +1122,100 @@ UINT Node::numCombinations(Node* pNode)
 }
 
 // Gets a pointer to the score if it exists, NULL otherwise.
-INT* Node::getScore()
+INT* Node::getScore(UINT maxPosition)
 {
    // If this is a terminal
-   if(this->m_label.getSymbol() >= 0) // TODO: Not sure about epsilons, i.e. if this should be > 0 rather
+   // As the terminal columns on the Python side are 0 based we only get < maxPosition. Otherwise we might ask for terminals that do not exist yet due to BΣN items
+   if(this->m_label.getSymbol() > 0 && this->m_label.getI() < maxPosition) 
    {
-      // TODO: call method to get score for terminal
+      // printf("Trying to call getGetScoreForTerminalFunc in the parser this time. Is null: %s\n", this->m_pParser->getGetScoreForTerminalFunc() == NULL ? "true" : "false");
+      // printf("m_nHandle: %d, symbol: %d, i: %d.\n", this->m_nHandle, this->m_label.getSymbol(), this->m_label.getI());
+      INT temp = (this->m_pParser->getGetScoreForTerminalFunc())(this->m_nHandle, this->m_label.getSymbol(), this->m_label.getI());
+      // printf("Creating a pointer to value %d and returning the pointer.\n", temp);
+      INT* retVal = new INT(temp);
+      return retVal;
    }
    // if this is a non-terminal and it has a score already
-   else if(this->m_label.getSymbol() < 0 && this->m_bHasScore)
+   else if(this->m_label.getSymbol() < 0 && this->m_bHasScore && this->m_label.getI() <= maxPosition)
+   {
+      // printf("We have a score of %d, returning it!\n", *this->m_pHead->pScore);
       return this->m_pHead->pScore; // return the score of remaining family / packed node
-   else return NULL; // otherwise we do not have a score yet so we return NULL.
+   }
+   else
+   {
+      // printf("Returning NULL\n");
+      return NULL; // otherwise we do not have a score yet so we return NULL.
+   }
 }
 
-void Node::doScore(UINT maxPosition)
+void Node::doScore(UINT maxPosition, UINT level)
 {
-   if(this->m_label.getSymbol() < 0 && !this->m_bHasScore && this->m_label.m_nI < maxPosition)
+   // printf("Start of doScore - node with symbol %d, i: %d, maxpos: %u, level: %d, m_bHasScore: %s\n", this->m_label.getSymbol(), this->m_label.getI(), maxPosition, level, this->m_bHasScore ? "true": "false");
+   if(this->m_label.getSymbol() < 0 && !this->m_bHasScore && this->m_label.m_nI <= maxPosition)
    {
+      // printf("Criteria met. Node with symbol %d, i: %d, maxpos: %u, level: %d, m_bHasScore: %s\n", this->m_label.getSymbol(), this->m_label.getI(), maxPosition, level, this->m_bHasScore ? "true": "false");
       FamilyEntry* p = this->m_pHead;
+      INT familyCounter = 1;
+      INT* p1Score = NULL;
+      INT* p2Score = NULL;
       while(p)
       {
+         // printf("Starting with family %d.\n", familyCounter);
          if(p->p1)
          {
-            p->p1->doScore(maxPosition);
+
+            // printf("Will score p1: %d, at level: %u\n", p->p1->getLabel().getSymbol(), level+1);
+            p->p1->doScore(maxPosition, level + 1);
+            // printf("p->p1->getScore for %d at level: %u\n", p->p1->getLabel().getSymbol(), level);
+            p1Score = p->p1->getScore(maxPosition);
          }
          if(p->p2)
          {
-            p->p2->doScore(maxPosition);
+            // printf("Will score p2: %d, at level: %u\n", p->p2->getLabel().getSymbol(), level+1);
+            p->p2->doScore(maxPosition, level + 1);
+            // printf("p->p2->getScore for %d at level: %u\n", p->p2->getLabel().getSymbol(), level);
+            p2Score = p->p2->getScore(maxPosition);
          }
          
-         // Get scores for each child if it exists
-         INT* p1Score = p->p1->getScore();
-         INT* p2Score = p->p2->getScore();
          if(p->p1 && p->p2 && p1Score && p2Score)
          {
             // we can add the scores for each and give the family a score which is their sum.
+            // printf("Adding two scores together making a sum of %d.\n", *p1Score + *p2Score);
             p->pScore = new INT(*p1Score + *p2Score);                                          
          }
          else if(p->p1 == NULL && p->p2 && p2Score)
          {
+            // printf("Only score for p2 set (unary) with value %d.\n", *p2Score);
             p->pScore = p2Score;
          }
+         else if(p->p1 == NULL && p->p2 == NULL)
+         {
+            // This is a wildcard non-terminal (* or ?) which has no children
+            // We give the family a score of 0
+            // printf("No children, so this is a wildcard non-terminal. Give the family a score of 0.\n");
+            p->pScore = new INT(0);
+         }
+         // else printf("No scores from child/children.\n");
+
+         // if(p->p1 == NULL && p->p2 == NULL) printf("No children. Checking for other families.\n");
+
          p = p->pNext;
+
+         familyCounter++;
+
+         // if(p == NULL) printf("No more families for this node.\n");
       }
       // Loop again through all families. If they have all been scored we can set
       // this->m_bHasScore to true and drop lower scoring families.
       p = this->m_pHead;
       BOOL anyUnscored = false;
       FamilyEntry* highestScoringFE = NULL;
-      INT highestScore = 0;
+      INT highestScore = -10000; // Just something low enough as scores can be negative but not that negative.
       while(p)
       {
          if(p->pScore == NULL) 
          {  
+            // printf("Found a NULL score. Breaking. - ");
             anyUnscored = true;
             break;
          }
@@ -1069,6 +1225,7 @@ void Node::doScore(UINT maxPosition)
             // as per suggestion from Miðeind.
             if(*p->pScore > highestScore)
             {
+               // printf("Found a score higher than highest score.\n");
                highestScore = *p->pScore;
                highestScoringFE = p;
             }
@@ -1077,6 +1234,7 @@ void Node::doScore(UINT maxPosition)
       }
       if(!anyUnscored) 
       {
+         // printf("All families have been scored.\n");
          this->m_bHasScore = true;
 
          // Throw away lower scoring families
@@ -1084,20 +1242,32 @@ void Node::doScore(UINT maxPosition)
          while (p) {
             FamilyEntry* pNext = p->pNext;
             if(highestScoringFE == p)
-            {
+            {  
+               // printf("The first family is the highest scoring.\n");
+               p->pNext = NULL;
                this->m_pHead = p;
             }
             else
             {
+               // remember to include <string> if you run this test again.
+               // printf("Dropping a family with node p1 with symbol %s and node p2 with symbol %s.\n", p->p1 == NULL ? "NULL" : std::to_string(p->p1->m_label.getSymbol()), p->p2 == NULL ? "NULL" : std::to_string(p->p2->m_label.getSymbol()));
                if (p->p1)
-                  p->p1->delRef();
+                  p->p1->delRef(); // This is ok
                if (p->p2)
-                  p->p2->delRef();
+                  p->p2->delRef(); // This is ok
                delete p;
             }
             p = pNext;
          }
       }  
+      else
+      {
+         // printf(" There are some unscored families owned by this node. Not dropping any for now.\n");
+      }
+   }
+   else
+   {
+      // printf("else in doScore - criteria not met - returning from method.\n");
    }
 }
 
@@ -1111,7 +1281,7 @@ NodeDict::~NodeDict(void)
    this->reset();
 }
 
-Node* NodeDict::lookupOrAdd(const Label& label)
+Node* NodeDict::lookupOrAdd(const Label& label, Parser* parser, UINT nHandle)
 {
    // If the label is already found in the NodeDict,
    // return the corresponding node.
@@ -1126,7 +1296,7 @@ Node* NodeDict::lookupOrAdd(const Label& label)
    }
    // Not found: add to the dict
    p = new NdEntry();
-   p->pNode = new Node(label);
+   p->pNode = new Node(label, parser, nHandle);
    p->pNext = this->m_pHead;
    this->m_pHead = p;
    return p->pNode;
@@ -1221,6 +1391,23 @@ BOOL NodeDict2::findAndDelete(Node* pNode)
    }
 }
 
+Node* NodeDict2::getTopNodeAndDeleteFromDict()
+{
+   if(this->m_length == 0) return NULL; // If the dictionary is empty
+
+   NdEntry2* p = this->m_pHead;
+   Node* topNode = p->pNode;
+   p = p->pNext;
+   while (p) {
+      INT currentNodeLength = p->pNode->getLabel().getJ() - p->pNode->getLabel().getI();
+      INT topNodeLength = topNode->getLabel().getJ() - topNode->getLabel().getI();
+      if(currentNodeLength > topNodeLength) topNode = p->pNode;
+      p = p->pNext;
+   }
+   this->findAndDelete(topNode);
+   return topNode;
+}
+
 void NodeDict2::reset(void)
 {
    NdEntry2* p = this->m_pHead;
@@ -1238,14 +1425,120 @@ UINT NodeDict2::getLength()
    return this->m_length;
 }
 
+BenOrPsiDict::BenOrPsiDict(void)
+   : m_pHead(NULL), m_pCurrent(NULL), m_length(0)
+{
+}
 
-Parser::Parser(Grammar* p, AddTerminalToSetFunc fpAddTerminalToSetFunc, StartScoringTerminalsForColumnFunc fpStartScoringTerminalsForColumn, MatchingFunc pMatchingFunc, AllocFunc pAllocFunc)
-   : m_pGrammar(p), m_pAddTerminalToSetFunc(fpAddTerminalToSetFunc), m_pStartScoringTerminalsForColumnFunc(fpStartScoringTerminalsForColumn), m_pMatchingFunc(pMatchingFunc), m_pAllocFunc(pAllocFunc)
+BenOrPsiDict::~BenOrPsiDict(void)
+{
+   this->reset();
+}
+
+BenOrPsiDict::BenOrPsiDictEntry* BenOrPsiDict::getHead()
+{
+   return this->m_pHead;
+}
+
+BOOL BenOrPsiDict::lookupOrAdd(State* pState)
+{
+   BenOrPsiDictEntry* p = this->m_pHead;
+   while (p)
+   {
+      if(p->pState == pState) return false;
+      p = p->pNext;
+   }
+   // Not found: add to the dict
+   p = new BenOrPsiDictEntry();
+   p->pState = pState;
+   p->pNext = this->m_pHead;
+   this->m_pHead = p;
+   this->m_length++;
+   return true;  
+}
+
+/* 
+   Just deletes the reference to the Earley item / state in the dictionary, not the actual node.
+*/
+BOOL BenOrPsiDict::findAndDelete(State* pState)
+{
+   BenOrPsiDictEntry* p = this->m_pHead;
+   if(p->pState == pState)
+   {
+      this->m_pHead = p->pNext;
+      delete p;
+      this->m_length--;
+      return true;
+   }
+   else
+   {
+      BenOrPsiDictEntry* lastEntry = p;
+      p = p->pNext;
+      while (p) {
+         if(p->pState == pState)
+         {
+            BenOrPsiDictEntry* pNext = p->pNext;
+            delete p;
+            lastEntry->pNext = pNext;
+            this->m_length--;
+            return true;
+         }
+         lastEntry = p;
+         p = p->pNext;
+      }
+
+      return false; // State was not found, return false;
+   }
+}
+
+State* BenOrPsiDict::next()
+{
+   if(this->m_pCurrent == NULL) // We are at the beginning or BenOrPsiDict is empty
+   {
+      this->m_pCurrent = this->m_pHead; // In case of empty then m_pHead will be NULL also
+   }
+   else
+   {
+      this->m_pCurrent = this->m_pCurrent->pNext;
+   }
+   if(this->m_pCurrent == NULL) return NULL;
+   else return this->m_pCurrent->pState;
+}
+
+/*
+   Delete all entries and start with a clean slate
+*/ 
+void BenOrPsiDict::reset(void)
+{
+   BenOrPsiDictEntry* p = this->m_pHead;
+   while(p) {
+      BenOrPsiDictEntry* pNext = p->pNext;
+      delete p;
+      p = pNext;
+   }
+   this->m_pHead = NULL;
+   this->m_length = 0;
+}
+
+UINT BenOrPsiDict::getLength()
+{
+   return this->m_length;
+}
+
+// Causes next() to start with the head in case m_pCurrent was somewhere in the middle.
+void BenOrPsiDict::resetCurrentToHead()
+{
+   this->m_pCurrent = NULL;
+}
+
+Parser::Parser(Grammar* p, AddTerminalToSetFunc fpAddTerminalToSetFunc, StartScoringTerminalsForColumnFunc fpStartScoringTerminalsForColumn, GetScoreForTerminalFunc fpGetScoreForTerminalFunc, MatchingFunc pMatchingFunc, AllocFunc pAllocFunc)
+   : m_pGrammar(p), m_pAddTerminalToSetFunc(fpAddTerminalToSetFunc), m_pStartScoringTerminalsForColumnFunc(fpStartScoringTerminalsForColumn), m_pGetScoreForTerminalFunc(fpGetScoreForTerminalFunc),  m_pMatchingFunc(pMatchingFunc), m_pAllocFunc(pAllocFunc)
 {
    ASSERT(this->m_pGrammar != NULL);
    ASSERT(this->m_pMatchingFunc != NULL);
    ASSERT(this->m_pAddTerminalToSetFunc != NULL);
-   ASSERT(this->m_pStartScoringTerminalsForColumnFunc);
+   ASSERT(this->m_pStartScoringTerminalsForColumnFunc != NULL);
+   ASSERT(this->m_pGetScoreForTerminalFunc != NULL);
 }
 
 Parser::~Parser(void)
@@ -1278,7 +1571,7 @@ void Parser::releaseCache(BYTE* abCache)
    delete [] abCache;
 }
 
-Node* Parser::makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, Column** ppColumns, UINT i, UINT nHandle)
+Node* Parser::makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, UINT i, UINT nHandle)
 {
    UINT nDot = pState->getDot() + 1;
    Production* pProd = pState->getProd();
@@ -1295,38 +1588,46 @@ Node* Parser::makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, Column
    if(pV)
    {
       nSymbolV = (*pProd)[nDot - 1];
+      /*if(nSymbolV > 0)
+      {
+         printf("makeNode - created nSymbolV = %d and position: %u, i: %u\n", nSymbolV, nDot - 1, i);
+         Helper::printProduction(pState);
+      }*/
    }
 
    INT nSymbolW = NULL;
    if(pW)
    {
       nSymbolW = (*pProd)[nDot - 2];
+      /*if(nSymbolW > 0)
+      {
+         printf("makeNode - created nSymbolW = %d, position: %u, i: %u\n", nSymbolW, nDot - 2, i);
+         Helper::printProduction(pState);
+      }*/
    }
 
    if (nDot >= nLen) { // RB: if β = eps { let s = B } í ritgerð
       // Completed production: label by nonterminal only
-      // Helper::printProduction(pState);
       nDot = 0;
-      pProdLabel = NULL;
-      
+      pProdLabel = NULL; 
    }
    Label label(iNtB, nDot, pProdLabel, nStart, nEnd);
-   Node* pY = ndV.lookupOrAdd(label);
+   Node* pY = ndV.lookupOrAdd(label, this, nHandle);
    
    // Add the parent node pY to the set / dictionary of top nodes which will start traversing into later
    this->m_topNodesToTraverse.lookupOrAdd(pY);
 
    // Add the child nodes pV and/or pW to the set / dictionary of child Nodes which we will use to delete from the 
-   // set of top nodes later. When traversing the nodes we will only interested in traversing top nodes and can therefore 
+   // set of top nodes later. When traversing the nodes we will only be interested in traversing top nodes and can therefore 
    // discard all child nodes.
    if(pW) this->m_childNodesToDelete.lookupOrAdd(pW);
    if(pV) this->m_childNodesToDelete.lookupOrAdd(pV);
 
-   pY->addFamily(pProd, pW, pV, i, nSymbolV, nSymbolW, pState, this->m_pAddTerminalToSetFunc, nHandle); // pW may be NULL
+   pY->addFamily(pProd, pW, pV, i, nSymbolV, nSymbolW, pState, this->m_pAddTerminalToSetFunc, nHandle, this); // pW may be NULL
    return pY;
 }
 
-void Parser::push(UINT nHandle, State* pState, Column* pE, State*& pQ, StateChunk* pChunkHead)
+void Parser::push(UINT nHandle, State* pState, Column* pE, State*& pQ, StateChunk* pChunkHead, UINT* pQLengthCounter)
 {
    INT iItem = pState->prodDot();
    if (iItem <= 0) {
@@ -1341,10 +1642,7 @@ void Parser::push(UINT nHandle, State* pState, Column* pE, State*& pQ, StateChun
       // Link into list whose head is pQ
       pState->setNext(pQ);
       pQ = pState;
-      Production* prod = pState->getProd();
-      INT dot = pState->getDot();
-      //printf("Added to Q state with terminal %d\n", (*prod)[dot]);
-      //Helper::printProduction(pState);
+      if(pQLengthCounter != NULL) *pQLengthCounter++;
       return;
    }
    // We did not actually push the state; discard it
@@ -1382,8 +1680,13 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
    UINT i;
    Column** pCol = new Column* [nTokens + 1];
    for (i = 0; i < nTokens; i++)
+   {
       pCol[i] = new Column(this, pnToklist ? pnToklist[i] : i);
+      pCol[i]->initializePsiSets(i);
+   }
+      
    pCol[i] = new Column(this, (UINT)-1); // Sentinel column
+   pCol[i]->initializePsiSets(i);
 
    // Initialize parser state
    State* pQ0 = NULL;
@@ -1399,7 +1702,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
 #ifdef DEBUG
       printf("For initial state, pushing production starting with nonterminal %d\n", (INT)(*p)[0]);
 #endif
-      this->push(nHandle, ps, pCol[0], pQ0, pChunkHead);
+      this->push(nHandle, ps, pCol[0], pQ0, pChunkHead, NULL);
       p = p->getNext();
    }
 
@@ -1414,10 +1717,26 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
    clock_t clockLast = clockStart;
 #endif
 
+   // TERMINAL SCORING ADDITION STARTS
+   // Counters declared
+   UINT* pQLengthCounter;
+   UINT nOldCountQ;
+   UINT nOldCountE;
+   // TERMINAL SCORING ADDITION ENDS
+
    for (i = 0; i < nTokens + 1; i++) {
 
       Column* pEi = pCol[i];
+      pEi->resetEnum();
       State* pState = pEi->nextState();
+
+      // TERMINAL SCORING ADDITION STARTS
+      // Counters reset in each iteration
+      pQLengthCounter = new UINT(0);
+      UINT nOldCountQ = 0;
+      UINT nOldCountE = 0;
+      printf("STARTING ROUND %u. Token is %u\n", i, pEi->getToken());
+      // TERMINAL SCORING ADDITION ENDS
 
 #ifdef DEBUG
       printf("Column %u, token %d\n", i, pEi->getToken());
@@ -1433,7 +1752,15 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       pQ = pQ0;
       pQ0 = NULL;
       HNode* pH = NULL;
-
+      
+      // TERMINAL SCORING ADDITION STARTS
+      // Count items in pQ
+      while(pQ)
+      {
+         (*pQLengthCounter)++;
+         pQ = pQ->getNext();
+      }
+      
       // No nonterminals seen yet
       memset(pbSeen, 0, nNumNonterminals * sizeof(BYTE));
 
@@ -1451,7 +1778,14 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
                p = (*this->m_pGrammar)[iItem]->getHead();
                while (p) {
                   State* psNew = new (pChunkHead) State(iItem, 0, p, i, NULL);
-                  this->push(nHandle, psNew, pEi, pQ, pChunkHead);
+
+                  // TERMINAL SCORING CHANGE STARTS
+                  nOldCountE = pEi->getLength();
+                  nOldCountQ = *pQLengthCounter;
+                  this->push(nHandle, psNew, pEi, pQ, pChunkHead, pQLengthCounter);
+                  if(i > 0 && i < nTokens) this->helperAddLevel1PsiToPsiDict(nOldCountE, nOldCountQ, pQLengthCounter, pEi, psNew);
+                  // TERMINAL SCORING CHANGE ENDS
+
                   p = p->getNext();
                }
             }
@@ -1461,10 +1795,15 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             HNode* ph = pH;
             while (ph) {
                if (ph->getNt() == iItem) {
-                  //printf("From predictor HNode handling - ");
-                  Node* pY = this->makeNode(pState, i, ph->getV(), ndV, pCol, i, nHandle);
+                  Node* pY = this->makeNode(pState, i, ph->getV(), ndV, i, nHandle);
                   State* psNew = new (pChunkHead) State(pState, pY);
-                  this->push(nHandle, psNew, pEi, pQ, pChunkHead);
+
+                  // TERMINAL SCORING CHANGE STARTS
+                  nOldCountE = pEi->getLength();
+                  nOldCountQ = *pQLengthCounter;
+                  this->push(nHandle, psNew, pEi, pQ, pChunkHead, pQLengthCounter);
+                  if(i > 0 && i < nTokens) this->helperAddLevel1PsiToPsiDict(nOldCountE, nOldCountQ, pQLengthCounter, pEi, psNew);
+                  // TERMINAL SCORING CHANGE ENDS
                }
                ph = ph->getNext();
             }
@@ -1477,8 +1816,8 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             Node* pW = pState->getNode();
             if (!pW) {
                Label label(iNtB, 0, NULL, i, i);
-               pW = ndV.lookupOrAdd(label);
-               pW->addFamily(pState->getProd(), NULL, NULL, i, NULL, NULL, pState, this->m_pAddTerminalToSetFunc, nHandle); // Epsilon production
+               pW = ndV.lookupOrAdd(label, this, nHandle);
+               pW->addFamily(pState->getProd(), NULL, NULL, i, NULL, NULL, pState, this->m_pAddTerminalToSetFunc, nHandle, this); // Epsilon production
             }
             if (nStart == i) {
                HNode* ph = new HNode(iNtB, pW);
@@ -1486,11 +1825,39 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
                pH = ph;
             }
             State* psNt = pCol[nStart]->getNtHead(iNtB);
+            UINT completerCounter = 0;
             while (psNt) {
-               // printf("From completer - ");
-               Node* pY = this->makeNode(psNt, i, pW, ndV, pCol, i, nHandle);
+               Node* pY = this->makeNode(psNt, i, pW, ndV, i, nHandle);
                State* psNew = new (pChunkHead) State(psNt, pY);
-               this->push(nHandle, psNew, pEi, pQ, pChunkHead);
+
+               // TERMINAL SCORING CHANGE STARTS
+               nOldCountE = pEi->getLength();
+               nOldCountQ = *pQLengthCounter;
+               this->push(nHandle, psNew, pEi, pQ, pChunkHead, NULL);
+               // Check for level 1  psi items in the Psi set for the current Earley set / column
+               if(i > 0 && i < nTokens) this->helperAddLevel1PsiToPsiDict(nOldCountE, nOldCountQ, pQLengthCounter, pEi, psNew); 
+
+               // Check for psi items that have propagated to this Earley set and put them in the correct Psi set.
+               // We only need to check for this if h (nStart) is greater than 0 as Earley set 0 does not have a Psi set.
+               if(nStart > 0 && nStart < i && (pEi->getLength() > nOldCountE || *pQLengthCounter > nOldCountQ)) 
+               {
+                  for(UINT j = 1; j < nStart + 1; j++) // Check all Psi sets in column E_h
+                  {
+                     BenOrPsiDict* psiDict = pCol[nStart]->getPsiDicts(j);
+                     psiDict->resetCurrentToHead();
+                     
+                     while(State* pSt3 = psiDict->next())
+                     {
+                        if(pSt3->getNt() == psNew->getNt() && pSt3->getProd() == psNew->getProd())
+                        {
+                           completerCounter++;
+                           pEi->addToPsiDicts(psNew, j);
+                        }
+                     }
+                  }
+               }
+               // TERMINAL SCORING CHANGE ENDS
+
                psNt = psNt->getNtNext();
             }
          }
@@ -1500,6 +1867,13 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
          pState = pEi->nextState();
 
       }
+      printf("After while consuming items from queue R - The following Psi sets are in column %u containing the following number of items:\n", i);
+      printf("PSISETS: ");
+      for(UINT j=0; j < i + 1; j++)
+      {
+         printf("[%u]: %u, ",j, pEi->getPsiDicts(j)->getLength());
+      }
+      printf(".\n");
 
       // Clean up the H set
       while (pH) {
@@ -1517,49 +1891,274 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
 
       if (pQ) {
          Label label(pEi->getToken(), 0, NULL, i, i + 1);
-         pV = new Node(label); // Reference is deleted below
+         pV = new Node(label, this, nHandle); // Reference is deleted below
          // Open up the next column
          pCol[i + 1]->startParse(nHandle);
       }
 
+      // TERMINAL SCORING CHANGE STARTS
+      if(i < nTokens) // No need to do this in the last iteration since all token nodes in BΣN items will be adopted now if the token sequence is in the language of the CFG
+      {
+         // printf("BEFORE SCANNER: Before starting to look for upper level psi items. Will populate NonPsiDict now.\n");
+         BOOL bUpperLevelPsiStateFound;
+         for(UINT j = 1; j < i + 1; j++)
+         {
+            // Reset NonPsiDict and repopulate it only with new items from this Earley set / column 
+            pEi->getNonPsiDictPointer()->reset();
+            pEi->resetEnum();
+            while(State* pSt5 = pEi->nextState())
+            {
+               if(pSt5->getStart() == i)
+               {
+                  pEi->getNonPsiDictPointer()->lookupOrAdd(pSt5);
+               }
+            }
+            State* pQcopy = pQ;
+            while(pQcopy)
+            {
+               if(pQcopy->getStart() == i)
+               {
+                  pEi->getNonPsiDictPointer()->lookupOrAdd(pQcopy);
+               }
+               pQcopy = pQcopy->getNext();
+            }
+
+            // printf("Starting for loop. Iteration %u, j: %u.\n", i, j);
+            UINT counter = 0;
+            do{
+               // Check new items against items already in this Earley sets' / columns' Psi sets. If any of them point to them then they are upper level psi items and added
+               // to the correspoinding Psi set
+               bUpperLevelPsiStateFound = false;
+               pEi->getNonPsiDictPointer()->resetCurrentToHead();
+               // printf("Going to loop through nonPsiDictsPointer which contains %u items.\n", pEi->getNonPsiDictPointer()->getLength());
+               UINT itemCount = 0;
+               while(State* pNonPsiState = pEi->getNonPsiDictPointer()->next())
+               {
+                  // Look at PsiDict in this Earley set (column)
+                  //printf("Looking into column %u. State: \n", nColNum);
+                  //Helper::printProduction(pNonPsiState);
+                  BenOrPsiDict* pPsiDict_j_InCurrent = pEi->getPsiDicts(j);
+                  pPsiDict_j_InCurrent->resetCurrentToHead();
+                  //printf("Going to loop through states in PsiDict for column %u, of length %u.\n", j, pPsiDict_j_InCurrent->getLength());
+                  while(State* pSt4 = pPsiDict_j_InCurrent->next())
+                  {
+                     if(pNonPsiState->getNt() == pSt4->prodDot())
+                     {
+                        // printf("Found state ");
+                        // Helper::printProduction(pSt4);
+
+                        // Add this upper level psi item to the Psi set for corresponding column
+                        pPsiDict_j_InCurrent->lookupOrAdd(pNonPsiState);
+                        
+                        // Remove from the non-psiState dictionary / linked list
+                        pEi->getNonPsiDictPointer()->findAndDelete(pNonPsiState);
+                        bUpperLevelPsiStateFound = true;
+                        itemCount++;
+                     }
+                  }
+               }
+               // printf("i: %u, j: %u, -- %u psi items in level %u found.\n", i, j, itemCount, ++counter + 1);
+               
+            } while(bUpperLevelPsiStateFound);
+         }
+         
+         // printf("BEFORE SCANNER: Done looking for upper level psi items. NonPsiDict length: %u.\n", pEi->getNonPsiDictPointer()->getLength());
+      }
+      // TERMINAL SCORING CHANGE ENDS
+
+      *pQLengthCounter = 0;
+      nOldCountQ = 0;
+      if(i < nTokens) nOldCountE = pCol[i + 1]->getLength();
+
       while (pQ) {
          // Earley scanner
          State* psNext = pQ->getNext();
-         // printf("From scanner - ");
-         Node* pY = this->makeNode(pQ, i + 1, pV, ndV, pCol, i, nHandle);
+         Node* pY = this->makeNode(pQ, i + 1, pV, ndV, i, nHandle);
          // Instead of throwing away the old state and creating
          // a new almost identical one, re-use the old after
          // 'incrementing' it by moving the dot one step to the right
          pQ->increment(pY);
          ASSERT(i + 1 <= nTokens);
-         this->push(nHandle, pQ, pCol[i + 1], pQ0, pChunkHead);
+         this->push(nHandle, pQ, pCol[i + 1], pQ0, pChunkHead, pQLengthCounter);      
          pQ = psNext;
       }
 
-      // Terminals scored
+      printf("AFTER SCANNER - The following Psi sets are in column %u containing the following number of items:\n", i);
+      printf("PSISETS: ");
+      for(UINT j=0; j < i + 1; j++)
+      {
+         printf("[%u]: %u, ", j, pEi->getPsiDicts(j)->getLength());
+      }
+      printf(".\n");
+
+      if(i < nTokens) printf("Added %u items to E_%d and %u items to Q' after SCANNER.\n", pCol[i + 1]->getLength() - nOldCountE, i + 1, *pQLengthCounter);
+
+      // TERMINAL SCORING CHANGE STARTS
+      if(i > 0 && i < nTokens)
+      {
+         pCol[i + 1]->resetEnum();
+         while(State* pSt2 = pCol[i + 1]->nextState())
+         {
+            // printf("Checking if the state added to E_%u", i + 1);
+            // Helper::printProduction(pSt2);
+            // printf("exists in Psi sets of current column %u.\n", i);
+            for(UINT j = 1; j < i + 1; j++)
+            {
+               pCol[j]->setTerminalScoringShouldBeDelayed(false); // Set this to false everywhere initially.
+               if(pCol[j]->areTerminalsScored() == false && helperStateIsInPsiSet(pSt2, pEi->getPsiDicts(j)))
+               {
+                  pCol[j]->setTerminalScoringShouldBeDelayed(true);
+                  pCol[i + 1]->getPsiDicts(j)->lookupOrAdd(pSt2);
+                  // printf("Yes, in Psi set for column %d.\n", j);
+               }
+               /*else
+               {
+                  printf("No, as far as items in set E_%d are concerned, not in E_%u's Psi set for column %d.\n", i + 1, i, j);
+               }*/
+            }
+         }
+         while(pQ0)
+         {
+            for(UINT j = 1; j < i + 1; j++)
+            {
+               if(pCol[j]->areTerminalsScored() == false && pCol[j]->shouldTerminalScoringBeDelayed() == false && helperStateIsInPsiSet(pQ0, pEi->getPsiDicts(j)))
+               {
+                  pCol[j]->setTerminalScoringShouldBeDelayed(true);
+                  pCol[i + 1]->getPsiDicts(j)->lookupOrAdd(pQ0);
+                  // printf("Yes, in Psi set for column %d.\n", j);
+               }
+               else
+               {
+                  // printf("No, as far as items in set Q' are concerned, not in E_%u's Psi set for column %d.\n", i, j);
+               }
+            }
+            pQ0 = pQ0->getNext();
+         }
+         printf("AFTER DELAY LOGIC - The following Psi sets are in column %u containing the following number of items:\n", i+1);
+         printf("PSISETS: ");
+         for(UINT j=0; j < i + 2; j++)
+         {
+            printf("[%u]: %u, ",j, pCol[i + 1]->getPsiDicts(j)->getLength());
+         }
+         printf(".\n");
+      }
+      else if(i == nTokens)// We are in the last round, now all terminals can be scored
+      {
+         for(int j = i; j > 0; j--) // The zero column is omitted as it will not be terminal scored.
+         {
+            pCol[j]->setTerminalScoringShouldBeDelayed(false); // Set this to false everywhere now in the last iteration.
+         }
+      }
+      else if(i == 0)
+      {
+         printf("Psi dict is empty in iteration 0.\n");
+      }
+
+      // Score the terminals
+      UINT nMaxPositionToScore = 0;
+      if(i > 0 && i < nTokens)
+      {
+         if(i==1) printf("Not scoring yet for i = 1 since we are 1-based on the C++ side when scoring the terminals. We will earliest score when i==2.\n");
+         for(UINT j = 1; j < i; j++)  // We only terminal-score the previous column provided the terminal scoring should not be further delayed due to BΣN and Psi items
+         {
+            printf("ROUND %u. Attempting to Score column %u:\n", i, j);
+            printf("pCol[%u]->areTerminalsScored() = %s, pCol[%u]->shouldTerminalScoringBeDelayed() = %s\n", j, pCol[j]->areTerminalsScored() ? "true" : "false", j, pCol[j]->shouldTerminalScoringBeDelayed() ? "true": "false");
+            if(pCol[j]->areTerminalsScored() == false && !pCol[j]->shouldTerminalScoringBeDelayed())
+            {
+               printf("Scoring terminals ...\n");
+               this->m_pStartScoringTerminalsForColumnFunc(nHandle, j-1); // Token position is 0 based on the Python side
+               pCol[j]->setTerminalsScored();
+            }
+            else
+            {
+               printf("Criteria not met. Not scoring this time.\n");
+
+               // Maximum position to score when scoring non-terminal nodes is the token position where we first encounter a column where
+               // we must delay the scoring of terminals due to the existens of items on the form BΣN
+               if(nMaxPositionToScore == 0) 
+               {
+                  nMaxPositionToScore = j-1; 
+                  printf("Max position set to %u\n", nMaxPositionToScore);
+               }
+            }
+         } 
+
+         // This printout debugging only works with text2 as the columns are hard-coded
+         // printf("Columns scored: [0]: %s, [1]: %s, [2]: %s, [3]: %s, [4]: %s, [5]: %s, [6]: %s, [7]: %s.\n", pCol[0]->areTerminalsScored() ? "true" : "false",
+         // pCol[1]->areTerminalsScored() ? "true" : "false", pCol[2]->areTerminalsScored() ? "true" : "false", pCol[3]->areTerminalsScored() ? "true" : "false", pCol[4]->areTerminalsScored() ? "true" : "false",
+         // pCol[5]->areTerminalsScored() ? "true" : "false", pCol[6]->areTerminalsScored() ? "true" : "false", pCol[7]->areTerminalsScored() ? "true" : "false");     
+      }
+      else if(i == nTokens)
+      {
+         for(int j = 1; j <= i; j++) 
+         {
+            printf("LAST ROUND %u. Now to score all remaining columns. Column %u:\n", i, j);
+            printf("column %d. pCol[j]->areTerminalsScored() = %s, pCol[j]->shouldTerminalScoringBeDelayed() = %s\n", j, pCol[j]->areTerminalsScored() ? "true" : "false", pCol[j]->shouldTerminalScoringBeDelayed() ? "true": "false");
+            if(pCol[j]->areTerminalsScored() == false)
+            {
+               printf("Scoring terminals ...\n");
+               this->m_pStartScoringTerminalsForColumnFunc(nHandle, j-1); // Token position is 0 based on the Python side
+               pCol[j]->setTerminalsScored();
+            }
+            else
+            {
+               printf("Criteria not met. Not scoring this time.\n");
+
+               // Maximum position to score when scoring non-terminal nodes is the token position where we first encounter a column where
+               // we must delay the scoring of terminals due to the existens of items on the form BΣN
+
+               nMaxPositionToScore = i; 
+               printf("Max position set to %u\n", nMaxPositionToScore);
+            }
+         } 
+
+         // This printout debugging only works with text2 as the columns are hard-coded
+         // printf("Columns scored: [0]: %s, [1]: %s, [2]: %s, [3]: %s, [4]: %s, [5]: %s, [6]: %s, [7]: %s.\n", pCol[0]->areTerminalsScored() ? "true" : "false",
+         // pCol[1]->areTerminalsScored() ? "true" : "false", pCol[2]->areTerminalsScored() ? "true" : "false", pCol[3]->areTerminalsScored() ? "true" : "false", pCol[4]->areTerminalsScored() ? "true" : "false",
+         // pCol[5]->areTerminalsScored() ? "true" : "false", pCol[6]->areTerminalsScored() ? "true" : "false", pCol[7]->areTerminalsScored() ? "true" : "false");          
+      }
+      // TERMINAL SCORING CHANGE ENDS
+
+      // NON-TERMINAL SCORING STARTS
       if(i > 0)
       {
-         printf("Starting to score for column %d\n", i-1);
-         this->m_pStartScoringTerminalsForColumnFunc(nHandle, i-1);
+         // printf("Before delete. Length of m_topNodesToTraverse: %u, Length of m_childNodesToDelete: %u\n", this->m_topNodesToTraverse.getLength(),
+
+         // Delete the child nodes before we start scoring non-terminal nodes as we will
+         // be proceeding top down.
+         while(Node* pNode = this->m_childNodesToDelete.next())
+         {
+            this->m_topNodesToTraverse.findAndDelete(pNode);
+         }
+
+         // printf("After delete. Length of m_topNodesToTraverse: %u, Length of m_childNodesToDelete: %u\n", this->m_topNodesToTraverse.getLength(),
+         //   this->m_childNodesToDelete.getLength());   
+
+         if(pCol[i-1]->areTerminalsScored())
+         {
+            printf("Attempting to score nodes ...\n");
+            // Find the top-most node
+            INT counter = 0;
+            while(Node* nodeToScore = this->m_topNodesToTraverse.getTopNodeAndDeleteFromDict())
+            {
+               // printf("Calling doScore for  %u\n", nMaxPositionToScore, counter);
+               nodeToScore->doScore(nMaxPositionToScore, 1);
+               // printf("Done scoring repetion %d\n", counter);
+               counter++;
+            }
+         }
+         else
+         {
+            printf("Not scoring nodes as terminals in column %u are not scored yet.\n", i-1);
+         }
       }
-
-      // Delete child nodes
-      //printf("Before delete. Length of m_topNodesToTraverse: %u, Length of m_childNodesToDelete: %u\n", this->m_topNodesToTraverse.getLength(),
-      //   this->m_childNodesToDelete.getLength());
-
-      while(Node* pNode = this->m_childNodesToDelete.next())
-      {
-         this->m_topNodesToTraverse.findAndDelete(pNode);
-      }
-
-      // printf("After delete. Length of m_topNodesToTraverse: %u, Length of m_childNodesToDelete: %u\n", this->m_topNodesToTraverse.getLength(),
-      //   this->m_childNodesToDelete.getLength());
+      // NON-TERMINAL SCORING ENDS
 
       // Clean up reference to pV created above
       if (pV)
          pV->delRef();
       
-      printf("Parser finished round %d\n", i);
+      printf("PARSER FINISHED ROUND %d\n", i);
 
    // if(i == nTokens) Helper::printSets(pCol, i);
 
@@ -1629,6 +2228,34 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
    return pResult; // The caller should call delRef() on this after using it
 }
 
+void Parser::helperAddLevel1PsiToPsiDict(UINT nOldCountE, UINT nOldCountQ, UINT* pQLengthCounter, Column* pEi, State* psNew)
+{
+   if(pEi->getLength() > nOldCountE || *pQLengthCounter > nOldCountQ)
+   {
+      // Earley item (state) was added. Check if it was on the form Psi level 1
+      // i.e. it point directly to a BΣN item
+      if(pEi->correspondingBenStateExists(psNew->getNt(), pEi->getToken()))
+      {
+         pEi->getPsiDicts(pEi->getToken())->lookupOrAdd(psNew);
+      }
+   }
+}
+
+BOOL Parser::helperStateIsInPsiSet(State* pState, BenOrPsiDict* pPsiSet)
+{
+   pPsiSet->resetCurrentToHead();
+   while(State* pStateFromPsiSet = pPsiSet->next())
+   {
+      // TODO: Sanity check this helper. Skrýtið ef ekkert færist yfir. 
+      if(pState->getNt() == pStateFromPsiSet->getNt() && pState->getProd() == pStateFromPsiSet->getProd())
+         //&& pState->getStart() == pStateFromPsiSet->getStart())
+      {
+         return true;
+      }
+   }
+   return false;
+}
+
 
 AllocReporter::AllocReporter(void)
 {
@@ -1689,11 +2316,11 @@ void deleteGrammar(Grammar* pGrammar)
       delete pGrammar;
 }
 
-Parser* newParser(Grammar* pGrammar, AddTerminalToSetFunc fpAddTerminalToSetFunc,StartScoringTerminalsForColumnFunc fpStartScoringTerminalsForColumn, MatchingFunc fpMatcher, AllocFunc fpAlloc)
+Parser* newParser(Grammar* pGrammar, AddTerminalToSetFunc fpAddTerminalToSetFunc, StartScoringTerminalsForColumnFunc fpStartScoringTerminalsForColumn, GetScoreForTerminalFunc fpGetScoreForTerminal, MatchingFunc fpMatcher, AllocFunc fpAlloc)
 {
-   if (!pGrammar || !fpMatcher || !fpAddTerminalToSetFunc || !fpStartScoringTerminalsForColumn)
+   if (!pGrammar || !fpMatcher || !fpAddTerminalToSetFunc || !fpStartScoringTerminalsForColumn || !fpGetScoreForTerminal)
       return NULL;
-   return new Parser(pGrammar, fpAddTerminalToSetFunc, fpStartScoringTerminalsForColumn, fpMatcher, fpAlloc);
+   return new Parser(pGrammar, fpAddTerminalToSetFunc, fpStartScoringTerminalsForColumn, fpGetScoreForTerminal, fpMatcher, fpAlloc);
 }
 
 void deleteParser(Parser* pParser)
@@ -1755,7 +2382,17 @@ void Helper::printProduction(State* pState)
    INT prodLength = pProd->getLength();
    if(prodLength == 0) return; // We are not interested in productions for epsilon nodes as they are always empty
    INT nDot = pState->getDot();
+   printf("(");
    Helper::printProduction(pProd, nNt, nDot);
+   printf(", h=%u, ", pState->getStart());
+   if(pState->getNode() != NULL)
+   {
+      printf("node=(%d, %u, %u), prodDot: %d)\n", pState->getNode()->getLabel().getSymbol(), pState->getNode()->getLabel().getI(), pState->getNode()->getLabel().getJ(), pState->prodDot());
+   }
+   else
+   {
+      printf("node=(null). prodDot: %d).\n", pState->prodDot());
+   }
 }
 
 void Helper::printProduction(Production* pProd, INT lhs, INT nDot)
@@ -1767,27 +2404,7 @@ void Helper::printProduction(Production* pProd, INT lhs, INT nDot)
       vProductions.push_back((*pProd)[i]);
    }
 
-   printf("dot: %d, length: %d, prodVector:       %d -> ", nDot, prodLength, lhs);
+   printf("PR: dot: %d, length: %d, prodVector:       %d -> ", nDot, prodLength, lhs);
    for(int i = 0; i < vProductions.size(); i++)
       printf("%d | ", vProductions[i]);
-   printf("\n");
 }
-/* 
-TODO: Delete later on.
-Old test function - might use again in case I want to see the sets from the python side on the C++ side. Not sure.
-void Helper::printSets(Column** cols, INT tokenSequenceLength)
-{
-   for(int i=0; i <= tokenSequenceLength; i++)
-   {
-      Column* col = cols[i];
-      std::set <INT> terminalsSet = (*col).getTerminalsSet();
-      printf("Set %d\n", i);
-      for (std::set<INT>::iterator j = terminalsSet.begin(); j != terminalsSet.end(); j++)
-      {
-         INT element = *j;
-         printf("%d ", element);
-      }
-      printf("\n");
-   }
-}
-*/

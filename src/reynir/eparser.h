@@ -68,6 +68,8 @@ class Parser;
 class State;
 class Column;
 class NodeDict;
+class NodeDict2;
+class BenOrPsiDict;
 class Label;
 struct StateChunk;
 
@@ -288,6 +290,9 @@ typedef BOOL (*AddTerminalToSetFunc)(UINT nHandle, UINT nColumnNumber, UINT nTer
 // Callback function to start scoring terminals associated with a column / Earley set
 typedef BOOL (*StartScoringTerminalsForColumnFunc)(UINT nHandle, UINT nColumnNumber);
 
+// Callback function to get the score for a terminal at a specific token position / column number.
+typedef INT (*GetScoreForTerminalFunc)(UINT nHandle, UINT nTerminalValue, UINT nColumnNumber);
+
 class Node {
 
    friend class AllocReporter;
@@ -306,6 +311,8 @@ private:
    FamilyEntry* m_pHead;
    UINT m_nRefCount;
    BOOL m_bHasScore = false;
+   UINT m_nHandle;
+   Parser* m_pParser; // Reference to the parser
 
    static AllocCounter ac;
 
@@ -315,14 +322,14 @@ protected:
 
 public:
 
-   Node(const Label&);
+   Node(const Label&, Parser*, UINT nHandle);
    ~Node(void);
 
    void addRef(void)
       { this->m_nRefCount++; }
    void delRef(void);
 
-   void addFamily(Production*, Node* pW, Node* pV, UINT i, INT nSymbolV, INT nSymbolW, State* pState, AddTerminalToSetFunc addTerminalToSetFunc, INT nHandle);
+   void addFamily(Production*, Node* pW, Node* pV, UINT i, INT nSymbolV, INT nSymbolW, State* pState, AddTerminalToSetFunc addTerminalToSetFunc, INT nHandle, Parser* parser);
 
    BOOL hasLabel(const Label& label) const
       { return this->m_label == label; }
@@ -336,16 +343,8 @@ public:
 
    static UINT numCombinations(Node*);
 
-   // TODO: It might be an idea to hold on to this function and use it along with a set
-   // implementation for the Node class if it turns out a really must sort the top nodes.
-   // In that case I can feed the Nodes in Parser.m_topNodesToTraverse after the child nodes have 
-   // been deleted. If it turns out I don't then delete this. Remember to add an include statement
-   // back for set.
-   BOOL operator< (const Node& otherNode) const;
-
-   INT* getScore();
-
-   void doScore(UINT maxPosition);
+   INT* getScore(UINT maxPosition);
+   void doScore(UINT maxPosition, UINT level);
 };
 
 class NodeDict2 {
@@ -370,12 +369,43 @@ public:
 
    UINT getLength();
 
+   Node* NodeDict2::getTopNodeAndDeleteFromDict();
+
 private:
    
    NdEntry2* m_pHead;
    NdEntry2* m_pCurrent;
    UINT m_length;
 
+};
+
+class BenOrPsiDict{
+
+public:
+
+   BenOrPsiDict(void);
+   ~BenOrPsiDict(void);
+
+   struct BenOrPsiDictEntry {
+      State* pState;
+      BenOrPsiDictEntry* pNext;
+   };
+
+   State* next();
+   BenOrPsiDictEntry* getHead();
+
+   BOOL lookupOrAdd(State* pState);
+   BOOL findAndDelete(State* pState);
+   void resetCurrentToHead();
+   void reset(void);
+
+   UINT getLength();
+
+private:
+
+   BenOrPsiDictEntry* m_pHead;
+   BenOrPsiDictEntry* m_pCurrent;
+   UINT m_length;
 };
 
 // Token-terminal matching function
@@ -395,6 +425,7 @@ class Parser {
 
    friend class AllocReporter;
    friend class Column;
+   friend class Node;
 
 private:
 
@@ -404,12 +435,15 @@ private:
    AllocFunc m_pAllocFunc;
    AddTerminalToSetFunc m_pAddTerminalToSetFunc;
    StartScoringTerminalsForColumnFunc m_pStartScoringTerminalsForColumnFunc;
+   GetScoreForTerminalFunc m_pGetScoreForTerminalFunc;
    NodeDict2 m_topNodesToTraverse;
    NodeDict2 m_childNodesToDelete;
 
-   void push(UINT nHandle, State*, Column*, State*&, StateChunk*);
+   void push(UINT nHandle, State*, Column*, State*&, StateChunk*, UINT* pQLengthCounter);
 
-   Node* makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, Column** ppColumns, UINT i, UINT nHandle);
+   Node* makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, UINT i, UINT nHandle);
+   void helperAddLevel1PsiToPsiDict(UINT nOldCountE, UINT nOldCountQ, UINT* pQLengthCounter, Column* pEi, State* psNew);
+   BOOL helperStateIsInPsiSet(State* pState, BenOrPsiDict* pPsiSet);
 
    // Internal token/terminal matching cache management
    BYTE* allocCache(UINT nHandle, UINT nToken, BOOL* pbNeedsRelease);
@@ -419,7 +453,7 @@ protected:
 
 public:
 
-   Parser(Grammar*, AddTerminalToSetFunc, StartScoringTerminalsForColumnFunc, MatchingFunc = defaultMatcher, AllocFunc = NULL);
+   Parser(Grammar*, AddTerminalToSetFunc, StartScoringTerminalsForColumnFunc, GetScoreForTerminalFunc, MatchingFunc = defaultMatcher, AllocFunc = NULL);
    ~Parser(void);
 
    UINT getNumTerminals(void) const
@@ -428,6 +462,8 @@ public:
       { return this->m_pGrammar->getNumNonterminals(); }
    MatchingFunc getMatchingFunc(void) const
       { return this->m_pMatchingFunc; }
+   GetScoreForTerminalFunc getGetScoreForTerminalFunc(void) const
+      { return this->m_pGetScoreForTerminalFunc; }
    Grammar* getGrammar(void) const
       { return this->m_pGrammar; }
 
@@ -444,8 +480,6 @@ public:
 
    static void printProduction(State* pState);
    static void printProduction(Production* pProd, INT lhs, INT nDot);
-   //static void printSets(Column** columns, INT tokenSequenceLength);
-
 };
 
 // Print a report on memory allocation
@@ -458,7 +492,7 @@ extern "C" Grammar* newGrammar(const CHAR* pszGrammarFile);
 
 extern "C" void deleteGrammar(Grammar*);
 
-extern "C" Parser* newParser(Grammar*, AddTerminalToSetFunc fpAddTerminalToSetFunc, StartScoringTerminalsForColumnFunc fpStartScoringTerminalsForColumn, MatchingFunc fpMatcher = defaultMatcher, AllocFunc fpAlloc = NULL);
+extern "C" Parser* newParser(Grammar*, AddTerminalToSetFunc fpAddTerminalToSetFunc, StartScoringTerminalsForColumnFunc fpStartScoringTerminalsForColumn, GetScoreForTerminalFunc fpGetScoreForTerminal, MatchingFunc fpMatcher = defaultMatcher, AllocFunc fpAlloc = NULL);
 
 extern "C" void deleteParser(Parser*);
 

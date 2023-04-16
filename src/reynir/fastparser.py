@@ -180,7 +180,7 @@ class ParseJob:
     def add_terminal_to_set_for_column(self, column_number: int, terminal_number: int) -> bool:
         if(len(self.columns) == column_number):
             self.columns.append(set())
-        elif(len(self.columns) > column_number + 1):
+        elif(len(self.columns) < column_number + 1):
             print("Column number was too high: {}. Current length is {}.".format(column_number, len(self.columns)))
             return False
         
@@ -225,7 +225,7 @@ class ParseJob:
             # No ambiguity to resolve here
             return True
         
-        token = self.tokens[column_number] # TODO: Verify later that the token sequence is 0 based
+        token = self.tokens[column_number] 
 
         # More than one terminal in the option set for the token at index i
         # Calculate the relative scores
@@ -460,6 +460,15 @@ class ParseJob:
 
         return True
     
+    def get_score_for_terminal(self, terminal_value: int, column_number: int) -> int:
+        try:
+            bin_terminal = cast(BIN_Terminal, self.grammar.lookup_terminal(terminal_value))
+            retVal = self.scores[column_number][bin_terminal]
+            return retVal
+        except:
+            print("Terminal {} not found in column {}.".format(terminal_value, column_number))
+    
+    
     def get_terminals_for_column(self, column_number: int) -> Any:
         print("Get the terminals for column {}. Number terminals: {}.".format(column_number, len(self.columns[column_number])))
         int_array_length = len(self.columns[column_number]) + 1
@@ -511,6 +520,11 @@ class ParseJob:
     def start_score_terminals_for_column(cls, handle: int, column_number: int):
         """Dispatch the request to the correct parse job"""
         return cls._jobs[handle].score_terminals_for_column(column_number)
+    
+    @classmethod
+    def get_score_for_terminal_in_column(cls, handle: int, terminal_value: int, column_number: int) -> int:
+        """Dispatch the request for the correct parse job"""
+        return cls._jobs[handle].get_score_for_terminal(terminal_value, column_number)
 
 # Declare CFFI callback functions to be called from the C++ code
 # See: https://cffi.readthedocs.io/en/latest/using.html#extern-python-new-style-callbacks
@@ -546,6 +560,11 @@ def add_terminal_func(handle: int, column_number: int, terminal_value: int):
 def score_terminals_func(handle: int, column_number: int):
     """Score all accumulated terminals in the set for a particular column / Earley set"""
     return ParseJob.start_score_terminals_for_column(handle, column_number)
+
+@ffi.def_extern() # type: ignore
+def get_score_for_terminal_func(handle: int, terminal_value: int, column_number: int):
+    """Get the score for a terminal at a certain column position / token position"""
+    return ParseJob.get_score_for_terminal_in_column(handle, terminal_value, column_number)
 
 class Node:
 
@@ -1013,7 +1032,7 @@ class Fast_Parser(BIN_Parser):
             # Create a C++ parser object for the grammar, passing the proxies for the
             # two Python callback functions into it
             self._c_parser: Any = eparser.newParser(  # type: ignore
-                c_grammar, eparser.add_terminal_func, eparser.score_terminals_func, eparser.matching_func, eparser.alloc_func  # type: ignore
+                c_grammar, eparser.add_terminal_func, eparser.score_terminals_func, eparser.get_score_for_terminal_func, eparser.matching_func, eparser.alloc_func  # type: ignore
             )
             # Find the index of the default root nonterminal for this parser instance
             self._root_index = (

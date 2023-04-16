@@ -100,11 +100,12 @@ declarations = """
     typedef BYTE* (*AllocFunc)(UINT nHandle, UINT nToken, UINT nSize);
     typedef BOOL (*AddTerminalToSetFunc)(UINT nHandle, UINT nColumnNumber, UINT nTerminalValue);
     typedef BOOL (*StartScoringTerminalsForColumnFunc)(UINT nHandle, UINT nColumnNumber);
+    typedef INT (*GetScoreForTerminalFunc)(UINT nHandle, UINT nTerminalValue, UINT nColumnNumber);
 
     struct Node* earleyParse(struct Parser*, UINT nTokens, INT iRoot, UINT nHandle, UINT* pnErrorToken);
     struct Grammar* newGrammar(const CHAR* pszGrammarFile);
     void deleteGrammar(struct Grammar*);
-    struct Parser* newParser(struct Grammar*, AddTerminalToSetFunc fpAddTerminalToSetFunc, StartScoringTerminalsForColumnFunc fpStartScoringTerminalsForColumn, MatchingFunc fpMatcher, AllocFunc fpAlloc);
+    struct Parser* newParser(struct Grammar*, AddTerminalToSetFunc fpAddTerminalToSetFunc, StartScoringTerminalsForColumnFunc fpStartScoringTerminalsForColumn, GetScoreForTerminalFunc fpGetScoreForTerminal, MatchingFunc fpMatcher, AllocFunc fpAlloc);
     void deleteParser(struct Parser*);
     void deleteForest(struct Node*);
     void dumpForest(struct Node*, struct Grammar*);
@@ -123,6 +124,7 @@ callbacks = """
     extern "Python" BYTE* alloc_func(UINT, UINT, UINT);
     extern "Python" BOOL add_terminal_func(UINT, UINT, UINT);
     extern "Python" BOOL score_terminals_func(UINT, UINT);
+    extern "Python" INT get_score_for_terminal_func(UINT, UINT, UINT);
 
 """
 
