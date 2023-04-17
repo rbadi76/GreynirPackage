@@ -653,13 +653,13 @@ class Node:
 
         node = cls(lb.nI, lb.nJ)  # Start token index, end token index
 
-        if lb.iNt >= 0:
+        if lb.iNt > 0:
             # Token node: find the corresponding terminal
-            assert parent is not None
-            tix: int = parent.pList[index]
-            node._terminal = job.grammar.lookup_terminal(tix)
-            #node._terminal = job.grammar.lookup_terminal(lb.iNt)
-            node._token = job.tokens[lb.iNt]
+            # assert parent is not None
+            # tix: int = parent.pList[index]
+            node._terminal = job.grammar.lookup_terminal(lb.iNt)
+            node._token = job.tokens[lb.nToken]
+            node.score = lb.nTerminalScore
             return node
 
         # Nonterminal node
@@ -719,6 +719,7 @@ class Node:
 
             push_pair(fe.p1, fe.p2)
             node._add_family(job, fe.pProd, ch)
+            node.score:int = fe.pScore[0]
             fe = fe.pNext
 
         return node

@@ -587,7 +587,7 @@ BOOL Column::addState(State* p)
    {
       if(this->m_oBenDict.lookupOrAdd(p))
       {
-         printf("BΣN item added for token position %u. Node's symbol is %d, prodDot is: %d, PR is:\n", this->m_nToken, p->getNode()->getLabel().getSymbol() + 1, p->prodDot());
+         printf("BEN item added for token position %u. Node's symbol is %d, prodDot is: %d, PR is:\n", this->m_nToken, p->getNode()->getLabel().getSymbol() + 1, p->prodDot());
          Helper::printProduction(p);
       }
    }
@@ -939,6 +939,51 @@ const WCHAR* Grammar::nameOfNt(INT iNt) const
 
 AllocCounter Node::ac;
 
+INT Label::getSymbol()
+{
+   return this->m_iNt;
+}
+
+UINT Label::getI()
+{
+   return this->m_nI;
+}
+
+UINT Label::getJ()
+{
+   return this->m_nJ;
+}
+
+Production* Label::getProduction()
+{
+   return this->m_pProd;
+}
+
+UINT Label::getDot()
+{
+   return this->m_nDot;
+}
+
+void Label::setToken(UINT nToken)
+{
+   this->m_nToken = nToken;
+}
+
+UINT Label::getToken()
+{
+   return this->m_nToken;
+}
+
+void Label::setTerminalScore(INT value)
+{
+   this->m_nTerminalScore = value;
+}
+
+INT Label::getTerminalScore()
+{
+   return this->m_nTerminalScore;
+}
+
 // Node constructor now needs a refrence to the parser and the handle for the terminal scoring feature
 // to be able to call the necessary functions on the Python side.
 Node::Node(const Label& label, Parser* parser, UINT nHandle)
@@ -999,10 +1044,11 @@ void Node::addFamily(Production* pProd, Node* pW, Node* pV, UINT i, INT nSymbolV
          bool success = fpAddTerminalToSetFunc(nHandle, tokenLabelW.getI(), nSymbolW);
          if(!success) printf("fpAddTerminalToSetFunc returned False for node pW. This should not happen.\n");
          Label labelW(nSymbolW, 0, NULL, tokenLabelW.getI(), tokenLabelW.getJ());
+         labelW.setToken(nChildSymbolW); // Token information is needed on the Python side
          Node* terminalNodeW = new Node(labelW, parser, nHandle);
          p->p1 = terminalNodeW; // No need to add reference here as it happens automatically when the new terminal node is created here above.
          // printf("addFamily pW - Added terminal %d to terminals set for column/getI: %u. getJ: %u, i: %u\n", nSymbolW, tokenLabelW.getI(), tokenLabelW.getJ(), i);
-         Helper::printProduction(pState);
+         // Helper::printProduction(pState);
       }
       else
       {
@@ -1026,10 +1072,11 @@ void Node::addFamily(Production* pProd, Node* pW, Node* pV, UINT i, INT nSymbolV
          bool success = fpAddTerminalToSetFunc(nHandle, tokenLabelV.getI(), nSymbolV);
          if(!success) printf("fpAddTerminalToSetFunc returned False for node pV. This should not happen.\n");
          Label labelV(nSymbolV, 0, NULL, tokenLabelV.getI(), tokenLabelV.getJ());
+         labelV.setToken(nChildSymbolV); // Token information is need on the Python side
          Node* terminalNodeV = new Node(labelV, parser, nHandle);
          p->p2 = terminalNodeV; // No need to add reference here as it happens automatically when the new terminal node is created here above.
          // printf("addFamily pV - Added terminal %d to terminals set for column/getI: %u, getJ: %u, i: %u.\n", nSymbolV, tokenLabelV.getI(), tokenLabelV.getJ(), i);
-         Helper::printProduction(pState);
+         // Helper::printProduction(pState);
       }
       else
       {
@@ -1042,7 +1089,7 @@ void Node::addFamily(Production* pProd, Node* pW, Node* pV, UINT i, INT nSymbolV
       p->p2 = pV;
    }
    
-   if(wasChild) Helper::printProduction(pState); // TODO: Just used for debugging - remove later, including pState parameter.
+   // if(wasChild) Helper::printProduction(pState); // TODO: Just used for debugging - remove later, including pState parameter.
    p->pNext = this->m_pHead;
    this->m_pHead = p;
 }
@@ -1133,6 +1180,7 @@ INT* Node::getScore(UINT maxPosition)
       INT temp = (this->m_pParser->getGetScoreForTerminalFunc())(this->m_nHandle, this->m_label.getSymbol(), this->m_label.getI());
       // printf("Creating a pointer to value %d and returning the pointer.\n", temp);
       INT* retVal = new INT(temp);
+      this->m_label.setTerminalScore(*retVal);
       return retVal;
    }
    // if this is a non-terminal and it has a score already
@@ -1150,60 +1198,44 @@ INT* Node::getScore(UINT maxPosition)
 
 void Node::doScore(UINT maxPosition, UINT level)
 {
-   // printf("Start of doScore - node with symbol %d, i: %d, maxpos: %u, level: %d, m_bHasScore: %s\n", this->m_label.getSymbol(), this->m_label.getI(), maxPosition, level, this->m_bHasScore ? "true": "false");
    if(this->m_label.getSymbol() < 0 && !this->m_bHasScore && this->m_label.m_nI <= maxPosition)
    {
-      // printf("Criteria met. Node with symbol %d, i: %d, maxpos: %u, level: %d, m_bHasScore: %s\n", this->m_label.getSymbol(), this->m_label.getI(), maxPosition, level, this->m_bHasScore ? "true": "false");
       FamilyEntry* p = this->m_pHead;
       INT familyCounter = 1;
       INT* p1Score = NULL;
       INT* p2Score = NULL;
       while(p)
       {
-         // printf("Starting with family %d.\n", familyCounter);
          if(p->p1)
          {
-
-            // printf("Will score p1: %d, at level: %u\n", p->p1->getLabel().getSymbol(), level+1);
             p->p1->doScore(maxPosition, level + 1);
-            // printf("p->p1->getScore for %d at level: %u\n", p->p1->getLabel().getSymbol(), level);
             p1Score = p->p1->getScore(maxPosition);
          }
          if(p->p2)
          {
-            // printf("Will score p2: %d, at level: %u\n", p->p2->getLabel().getSymbol(), level+1);
             p->p2->doScore(maxPosition, level + 1);
-            // printf("p->p2->getScore for %d at level: %u\n", p->p2->getLabel().getSymbol(), level);
             p2Score = p->p2->getScore(maxPosition);
          }
          
          if(p->p1 && p->p2 && p1Score && p2Score)
          {
             // we can add the scores for each and give the family a score which is their sum.
-            // printf("Adding two scores together making a sum of %d.\n", *p1Score + *p2Score);
             p->pScore = new INT(*p1Score + *p2Score);                                          
          }
          else if(p->p1 == NULL && p->p2 && p2Score)
          {
-            // printf("Only score for p2 set (unary) with value %d.\n", *p2Score);
             p->pScore = p2Score;
          }
          else if(p->p1 == NULL && p->p2 == NULL)
          {
             // This is a wildcard non-terminal (* or ?) which has no children
             // We give the family a score of 0
-            // printf("No children, so this is a wildcard non-terminal. Give the family a score of 0.\n");
             p->pScore = new INT(0);
          }
-         // else printf("No scores from child/children.\n");
-
-         // if(p->p1 == NULL && p->p2 == NULL) printf("No children. Checking for other families.\n");
-
+         
          p = p->pNext;
 
          familyCounter++;
-
-         // if(p == NULL) printf("No more families for this node.\n");
       }
       // Loop again through all families. If they have all been scored we can set
       // this->m_bHasScore to true and drop lower scoring families.
@@ -1215,7 +1247,6 @@ void Node::doScore(UINT maxPosition, UINT level)
       {
          if(p->pScore == NULL) 
          {  
-            // printf("Found a NULL score. Breaking. - ");
             anyUnscored = true;
             break;
          }
@@ -1225,7 +1256,6 @@ void Node::doScore(UINT maxPosition, UINT level)
             // as per suggestion from Miðeind.
             if(*p->pScore > highestScore)
             {
-               // printf("Found a score higher than highest score.\n");
                highestScore = *p->pScore;
                highestScoringFE = p;
             }
@@ -1234,7 +1264,6 @@ void Node::doScore(UINT maxPosition, UINT level)
       }
       if(!anyUnscored) 
       {
-         // printf("All families have been scored.\n");
          this->m_bHasScore = true;
 
          // Throw away lower scoring families
@@ -1243,14 +1272,12 @@ void Node::doScore(UINT maxPosition, UINT level)
             FamilyEntry* pNext = p->pNext;
             if(highestScoringFE == p)
             {  
-               // printf("The first family is the highest scoring.\n");
                p->pNext = NULL;
                this->m_pHead = p;
             }
             else
             {
                // remember to include <string> if you run this test again.
-               // printf("Dropping a family with node p1 with symbol %s and node p2 with symbol %s.\n", p->p1 == NULL ? "NULL" : std::to_string(p->p1->m_label.getSymbol()), p->p2 == NULL ? "NULL" : std::to_string(p->p2->m_label.getSymbol()));
                if (p->p1)
                   p->p1->delRef(); // This is ok
                if (p->p2)
@@ -1260,14 +1287,6 @@ void Node::doScore(UINT maxPosition, UINT level)
             p = pNext;
          }
       }  
-      else
-      {
-         // printf(" There are some unscored families owned by this node. Not dropping any for now.\n");
-      }
-   }
-   else
-   {
-      // printf("else in doScore - criteria not met - returning from method.\n");
    }
 }
 
@@ -2071,14 +2090,15 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             }
             else
             {
-               printf("Criteria not met. Not scoring this time.\n");
+               if(pCol[j]->areTerminalsScored() == true) printf("Column's terminals already scored.\n");
+               else printf("Scoring needs to be delayed. Propagated psi-items detected.");
 
                // Maximum position to score when scoring non-terminal nodes is the token position where we first encounter a column where
                // we must delay the scoring of terminals due to the existens of items on the form BΣN
                if(nMaxPositionToScore == 0) 
                {
                   nMaxPositionToScore = j-1; 
-                  printf("Max position set to %u\n", nMaxPositionToScore);
+                  // printf( "Max position set to %u\n", nMaxPositionToScore);
                }
             }
          } 
@@ -2092,23 +2112,23 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       {
          for(int j = 1; j <= i; j++) 
          {
-            printf("LAST ROUND %u. Now to score all remaining columns. Column %u:\n", i, j);
-            printf("column %d. pCol[j]->areTerminalsScored() = %s, pCol[j]->shouldTerminalScoringBeDelayed() = %s\n", j, pCol[j]->areTerminalsScored() ? "true" : "false", pCol[j]->shouldTerminalScoringBeDelayed() ? "true": "false");
+            // printf( "LAST ROUND %u. Now to score all remaining columns. Column %u:\n", i, j);
+            // printf( "column %d. pCol[j]->areTerminalsScored() = %s, pCol[j]->shouldTerminalScoringBeDelayed() = %s\n", j, pCol[j]->areTerminalsScored() ? "true" : "false", pCol[j]->shouldTerminalScoringBeDelayed() ? "true": "false");
             if(pCol[j]->areTerminalsScored() == false)
             {
-               printf("Scoring terminals ...\n");
+               // printf( "Scoring terminals ...\n");
                this->m_pStartScoringTerminalsForColumnFunc(nHandle, j-1); // Token position is 0 based on the Python side
                pCol[j]->setTerminalsScored();
             }
             else
             {
-               printf("Criteria not met. Not scoring this time.\n");
+               // printf( "Criteria not met. Not scoring this time.\n");
 
                // Maximum position to score when scoring non-terminal nodes is the token position where we first encounter a column where
                // we must delay the scoring of terminals due to the existens of items on the form BΣN
 
                nMaxPositionToScore = i; 
-               printf("Max position set to %u\n", nMaxPositionToScore);
+               // printf( "Max position set to %u\n", nMaxPositionToScore);
             }
          } 
 
@@ -2131,25 +2151,20 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             this->m_topNodesToTraverse.findAndDelete(pNode);
          }
 
-         // printf("After delete. Length of m_topNodesToTraverse: %u, Length of m_childNodesToDelete: %u\n", this->m_topNodesToTraverse.getLength(),
-         //   this->m_childNodesToDelete.getLength());   
-
-         if(pCol[i-1]->areTerminalsScored())
+         printf("After delete. Length of m_topNodesToTraverse: %u, Length of m_childNodesToDelete: %u\n", this->m_topNodesToTraverse.getLength(),
+            this->m_childNodesToDelete.getLength());   
+         if(pCol[i-1]->areTerminalsScored() && nMaxPositionToScore > 0)
          {
-            printf("Attempting to score nodes ...\n");
+            printf( "Attempting to score nodes ...\n");
             // Find the top-most node
-            INT counter = 0;
             while(Node* nodeToScore = this->m_topNodesToTraverse.getTopNodeAndDeleteFromDict())
             {
-               // printf("Calling doScore for  %u\n", nMaxPositionToScore, counter);
                nodeToScore->doScore(nMaxPositionToScore, 1);
-               // printf("Done scoring repetion %d\n", counter);
-               counter++;
             }
          }
          else
          {
-            printf("Not scoring nodes as terminals in column %u are not scored yet.\n", i-1);
+            printf( "Not scoring nodes as terminals in column %u are not scored yet.\n", i-1);
          }
       }
       // NON-TERMINAL SCORING ENDS

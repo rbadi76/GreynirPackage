@@ -248,6 +248,8 @@ private:
    Production* m_pProd;
    UINT m_nI;
    UINT m_nJ;
+   UINT m_nToken;
+   INT m_nTerminalScore;
 
 public:
 
@@ -258,30 +260,15 @@ public:
    BOOL operator==(const Label& other) const
       { return ::memcmp((void*)this, (void*)&other, sizeof(Label)) == 0; }
 
-   INT getSymbol()
-   {
-      return this->m_iNt;
-   }
-
-   UINT getI()
-   {
-      return this->m_nI;
-   }
-
-   UINT getJ()
-   {
-      return this->m_nJ;
-   }
-
-   Production* getProduction()
-   {
-      return this->m_pProd;
-   }
-
-   UINT getDot()
-   {
-      return this->m_nDot;
-   }
+   INT getSymbol();
+   UINT getI();
+   UINT getJ();
+   Production* getProduction();
+   UINT getDot();
+   void setToken(UINT nToken);
+   UINT getToken();
+   void setTerminalScore(INT value);
+   INT getTerminalScore();
 };
 
 // Callback function to Python to add a terminal to a set for a specific column / Earley set.

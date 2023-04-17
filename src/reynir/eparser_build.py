@@ -79,6 +79,8 @@ declarations = """
         struct Production* pProd;
         UINT nI;
         UINT nJ;
+        UINT nToken;
+        INT nTerminalScore;
     };
 
     struct FamilyEntry {
@@ -86,6 +88,7 @@ declarations = """
         struct Node* p1;
         struct Node* p2;
         struct FamilyEntry* pNext;
+        INT* pScore;
     };
 
     struct Node {
