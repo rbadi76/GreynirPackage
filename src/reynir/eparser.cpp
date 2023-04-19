@@ -1773,13 +1773,14 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       pQ0 = NULL;
       HNode* pH = NULL;
       
-      // TERMINAL SCORING ADDITION STARTS
+      // TERMINAL SCORING CHANGE STARTS
       // Count items in pQ
       while(pQ)
       {
          (*pQLengthCounter)++;
          pQ = pQ->getNext();
       }
+      // TERMINAL SCORING CHANGE ENDS
       
       // No nonterminals seen yet
       memset(pbSeen, 0, nNumNonterminals * sizeof(BYTE));
