@@ -29,20 +29,21 @@ text2 = "Hún réð sig til vinnu á gúmmíbát"
 job = g.submit(text2)
 for sent in job:
     if sent.parse():
-        print(sent.tree)
-        #print("Parsing sentence - skipping showing the whole tree.")
+        # print(sent.tree)
+        print("Sentence parsed - skipping showing the whole tree.")
     else:
         print("Error at index {}".format(sent.err_index))
 num_sentences = job.num_sentences   # Total number of sentences
 num_parsed = job.num_parsed         # Thereof successfully parsed
 ambiguity = job.ambiguity           # Average ambiguity factor
 parse_time = job.parse_time         # Elapsed time since job was created
+reduction_time = job.reduce_time    # Reduction time
 print("Done.")
 print("Number of sentences: {}".format(num_sentences))
 print("Thereof successfully parsed: {}".format(num_parsed))
 print("Average ambiguity factor: {}".format(ambiguity))
 print("Parse time: {}".format(parse_time))
-
+print("Reduction time: {}".format(reduction_time))
 
 #print(sent.tree.view)
 #print("Is it?: " + str(sent._tree.is_ambiguous))

@@ -585,11 +585,12 @@ BOOL Column::addState(State* p)
    // add 1 to the symbol for this to match correctly
    if(p->getNode() != NULL && p->getNode()->getLabel().getSymbol() + 1 == this->getToken() && p->prodDot() < 0)
    {
-      if(this->m_oBenDict.lookupOrAdd(p))
+      this->m_oBenDict.lookupOrAdd(p);
+      /*if(this->m_oBenDict.lookupOrAdd(p))
       {
          printf("BEN item added for token position %u. Node's symbol is %d, prodDot is: %d, PR is:\n", this->m_nToken, p->getNode()->getLabel().getSymbol() + 1, p->prodDot());
          Helper::printProduction(p);
-      }
+      }*/
    }
    this->m_nLength++;
    return true;
@@ -1754,7 +1755,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       pQLengthCounter = new UINT(0);
       UINT nOldCountQ = 0;
       UINT nOldCountE = 0;
-      printf("STARTING ROUND %u. Token is %u\n", i, pEi->getToken());
+      // printf("STARTING ROUND %u. Token is %u\n", i, pEi->getToken());
       // TERMINAL SCORING ADDITION ENDS
 
 #ifdef DEBUG
@@ -1886,13 +1887,13 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
          pState = pEi->nextState();
 
       }
-      printf("After while consuming items from queue R - The following Psi sets are in column %u containing the following number of items:\n", i);
-      printf("PSISETS: ");
+      // printf("After while consuming items from queue R - The following Psi sets are in column %u containing the following number of items:\n", i);
+      /*printf("PSISETS: ");
       for(UINT j=0; j < i + 1; j++)
       {
          printf("[%u]: %u, ",j, pEi->getPsiDicts(j)->getLength());
       }
-      printf(".\n");
+      printf(".\n");*/
 
       // Clean up the H set
       while (pH) {
@@ -2002,15 +2003,15 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
          pQ = psNext;
       }
 
-      printf("AFTER SCANNER - The following Psi sets are in column %u containing the following number of items:\n", i);
+      /*printf("AFTER SCANNER - The following Psi sets are in column %u containing the following number of items:\n", i);
       printf("PSISETS: ");
       for(UINT j=0; j < i + 1; j++)
       {
          printf("[%u]: %u, ", j, pEi->getPsiDicts(j)->getLength());
       }
-      printf(".\n");
+      printf(".\n");*/
 
-      if(i < nTokens) printf("Added %u items to E_%d and %u items to Q' after SCANNER.\n", pCol[i + 1]->getLength() - nOldCountE, i + 1, *pQLengthCounter);
+      // if(i < nTokens) printf("Added %u items to E_%d and %u items to Q' after SCANNER.\n", pCol[i + 1]->getLength() - nOldCountE, i + 1, *pQLengthCounter);
 
       // TERMINAL SCORING CHANGE STARTS
       if(i > 0 && i < nTokens)
@@ -2053,13 +2054,13 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             }
             pQ0 = pQ0->getNext();
          }
-         printf("AFTER DELAY LOGIC - The following Psi sets are in column %u containing the following number of items:\n", i+1);
+         /*printf("AFTER DELAY LOGIC - The following Psi sets are in column %u containing the following number of items:\n", i+1);
          printf("PSISETS: ");
          for(UINT j=0; j < i + 2; j++)
          {
             printf("[%u]: %u, ",j, pCol[i + 1]->getPsiDicts(j)->getLength());
          }
-         printf(".\n");
+         printf(".\n");*/
       }
       else if(i == nTokens)// We are in the last round, now all terminals can be scored
       {
@@ -2068,30 +2069,30 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             pCol[j]->setTerminalScoringShouldBeDelayed(false); // Set this to false everywhere now in the last iteration.
          }
       }
-      else if(i == 0)
+      /*else if(i == 0)
       {
          printf("Psi dict is empty in iteration 0.\n");
-      }
+      }*/
 
       // Score the terminals
       UINT nMaxPositionToScore = 0;
       if(i > 0 && i < nTokens)
       {
-         if(i==1) printf("Not scoring yet for i = 1 since we are 1-based on the C++ side when scoring the terminals. We will earliest score when i==2.\n");
+         // if(i==1) printf("Not scoring yet for i = 1 since we are 1-based on the C++ side when scoring the terminals. We will earliest score when i==2.\n");
          for(UINT j = 1; j < i; j++)  // We only terminal-score the previous column provided the terminal scoring should not be further delayed due to BΣN and Psi items
          {
-            printf("ROUND %u. Attempting to Score column %u:\n", i, j);
-            printf("pCol[%u]->areTerminalsScored() = %s, pCol[%u]->shouldTerminalScoringBeDelayed() = %s\n", j, pCol[j]->areTerminalsScored() ? "true" : "false", j, pCol[j]->shouldTerminalScoringBeDelayed() ? "true": "false");
+            // printf("ROUND %u. Attempting to Score column %u:\n", i, j);
+            // printf("pCol[%u]->areTerminalsScored() = %s, pCol[%u]->shouldTerminalScoringBeDelayed() = %s\n", j, pCol[j]->areTerminalsScored() ? "true" : "false", j, pCol[j]->shouldTerminalScoringBeDelayed() ? "true": "false");
             if(pCol[j]->areTerminalsScored() == false && !pCol[j]->shouldTerminalScoringBeDelayed())
             {
-               printf("Scoring terminals ...\n");
+               // printf("Scoring terminals ...\n");
                this->m_pStartScoringTerminalsForColumnFunc(nHandle, j-1); // Token position is 0 based on the Python side
                pCol[j]->setTerminalsScored();
             }
             else
             {
-               if(pCol[j]->areTerminalsScored() == true) printf("Column's terminals already scored.\n");
-               else printf("Scoring needs to be delayed. Propagated psi-items detected.");
+               // if(pCol[j]->areTerminalsScored() == true) printf("Column's terminals already scored.\n");
+               // else printf("Scoring needs to be delayed. Propagated psi-items detected.");
 
                // Maximum position to score when scoring non-terminal nodes is the token position where we first encounter a column where
                // we must delay the scoring of terminals due to the existens of items on the form BΣN
@@ -2151,21 +2152,21 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             this->m_topNodesToTraverse.findAndDelete(pNode);
          }
 
-         printf("After delete. Length of m_topNodesToTraverse: %u, Length of m_childNodesToDelete: %u\n", this->m_topNodesToTraverse.getLength(),
-            this->m_childNodesToDelete.getLength());   
+         // printf("After delete. Length of m_topNodesToTraverse: %u, Length of m_childNodesToDelete: %u\n", this->m_topNodesToTraverse.getLength(),
+         //   this->m_childNodesToDelete.getLength());   
          if(pCol[i-1]->areTerminalsScored() && nMaxPositionToScore > 0)
          {
-            printf( "Attempting to score nodes ...\n");
+            // printf( "Attempting to score nodes ...\n");
             // Find the top-most node
             while(Node* nodeToScore = this->m_topNodesToTraverse.getTopNodeAndDeleteFromDict())
             {
                nodeToScore->doScore(nMaxPositionToScore, 1);
             }
          }
-         else
+         /*else
          {
             printf( "Not scoring nodes as terminals in column %u are not scored yet.\n", i-1);
-         }
+         }*/
       }
       // NON-TERMINAL SCORING ENDS
 
@@ -2173,7 +2174,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       if (pV)
          pV->delRef();
       
-      printf("PARSER FINISHED ROUND %d\n", i);
+      // printf("PARSER FINISHED ROUND %d\n", i);
 
    // if(i == nTokens) Helper::printSets(pCol, i);
 
@@ -2236,8 +2237,8 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
    clockNow = clock() - clockStart;
    printf("Cleanup finished, elapsed %.3f sec\n",
       ((float)clockNow) / CLOCKS_PER_SEC);
-   if (pResult)
-      pResult->dump(this->m_pGrammar);
+   //if (pResult)
+   //   pResult->dump(this->m_pGrammar);
 #endif
 
    return pResult; // The caller should call delRef() on this after using it
