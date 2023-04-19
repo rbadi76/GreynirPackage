@@ -42,7 +42,7 @@
 
 */
 
-// #define DEBUG
+#define DEBUG
 
 #include <stdio.h>
 #include <stdint.h>
@@ -1780,10 +1780,14 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
          (*pQLengthCounter)++;
          pQ = pQ->getNext();
       }
+      // TERMINAL SCORING ADDITION ENDS
       
       // No nonterminals seen yet
       memset(pbSeen, 0, nNumNonterminals * sizeof(BYTE));
 
+#ifdef DEBUG
+      clock_t clockStartWhile = clock();
+#endif
       while (pState) {
 
          INT iItem = pState->prodDot();
@@ -1887,6 +1891,16 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
          pState = pEi->nextState();
 
       }
+#ifdef DEBUG
+      clock_t clockNow2 = clock();
+      clock_t clockElapsed2 = clockNow2 - clockStart;
+      clock_t clockThis2 = clockNow2 - clockStartWhile;
+      printf ("While loop consuming R done. Finished in %.3f sec, elapsed %.3f sec\n",
+         ((float)clockThis2) / CLOCKS_PER_SEC, ((float)clockElapsed2) / CLOCKS_PER_SEC);
+      fflush(stdout);
+#endif
+
+
       // printf("After while consuming items from queue R - The following Psi sets are in column %u containing the following number of items:\n", i);
       /*printf("PSISETS: ");
       for(UINT j=0; j < i + 1; j++)
@@ -1919,6 +1933,9 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       // TERMINAL SCORING CHANGE STARTS
       if(i < nTokens) // No need to do this in the last iteration since all token nodes in BΣN items will be adopted now if the token sequence is in the language of the CFG
       {
+#ifdef DEBUG
+         clock_t clockStartUpperPsi = clock();
+#endif
          // printf("BEFORE SCANNER: Before starting to look for upper level psi items. Will populate NonPsiDict now.\n");
          BOOL bUpperLevelPsiStateFound;
          for(UINT j = 1; j < i + 1; j++)
@@ -1983,6 +2000,14 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
          }
          
          // printf("BEFORE SCANNER: Done looking for upper level psi items. NonPsiDict length: %u.\n", pEi->getNonPsiDictPointer()->getLength());
+#ifdef DEBUG
+         clock_t clockNow3 = clock();
+         clock_t clockElapsed3 = clockNow3 - clockStart;
+         clock_t clockThis3 = clockNow3 - clockStartUpperPsi;
+         printf ("Done looking for upper level psi-items. Finished in %.3f sec, elapsed %.3f sec\n",
+            ((float)clockThis3) / CLOCKS_PER_SEC, ((float)clockElapsed3) / CLOCKS_PER_SEC);
+         fflush(stdout);
+#endif
       }
       // TERMINAL SCORING CHANGE ENDS
 
@@ -2003,17 +2028,10 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
          pQ = psNext;
       }
 
-      /*printf("AFTER SCANNER - The following Psi sets are in column %u containing the following number of items:\n", i);
-      printf("PSISETS: ");
-      for(UINT j=0; j < i + 1; j++)
-      {
-         printf("[%u]: %u, ", j, pEi->getPsiDicts(j)->getLength());
-      }
-      printf(".\n");*/
-
-      // if(i < nTokens) printf("Added %u items to E_%d and %u items to Q' after SCANNER.\n", pCol[i + 1]->getLength() - nOldCountE, i + 1, *pQLengthCounter);
-
       // TERMINAL SCORING CHANGE STARTS
+#ifdef DEBUG
+      clock_t startCheckNextEitemsInPsiSets = clock();
+#endif
       if(i > 0 && i < nTokens)
       {
          pCol[i + 1]->resetEnum();
@@ -2054,13 +2072,6 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             }
             pQ0 = pQ0->getNext();
          }
-         /*printf("AFTER DELAY LOGIC - The following Psi sets are in column %u containing the following number of items:\n", i+1);
-         printf("PSISETS: ");
-         for(UINT j=0; j < i + 2; j++)
-         {
-            printf("[%u]: %u, ",j, pCol[i + 1]->getPsiDicts(j)->getLength());
-         }
-         printf(".\n");*/
       }
       else if(i == nTokens)// We are in the last round, now all terminals can be scored
       {
@@ -2069,13 +2080,22 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             pCol[j]->setTerminalScoringShouldBeDelayed(false); // Set this to false everywhere now in the last iteration.
          }
       }
-      /*else if(i == 0)
-      {
-         printf("Psi dict is empty in iteration 0.\n");
-      }*/
+      
+#ifdef DEBUG
+      clock_t clockNow4 = clock();
+      clock_t clockElapsed4 = clockNow4 - clockStart;
+      clock_t clockThis4 = clockNow4 - startCheckNextEitemsInPsiSets;
+      printf ("Done checking if items in next Earley set are in any of Psi sets of the current column. Finished in %.3f sec, elapsed %.3f sec\n",
+         ((float)clockThis4) / CLOCKS_PER_SEC, ((float)clockElapsed4) / CLOCKS_PER_SEC);
+      fflush(stdout);
+#endif
+
 
       // Score the terminals
       UINT nMaxPositionToScore = 0;
+#ifdef DEBUG
+      clock_t startTerminalScoring = clock();
+#endif
       if(i > 0 && i < nTokens)
       {
          // if(i==1) printf("Not scoring yet for i = 1 since we are 1-based on the C++ side when scoring the terminals. We will earliest score when i==2.\n");
@@ -2138,9 +2158,20 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
          // pCol[1]->areTerminalsScored() ? "true" : "false", pCol[2]->areTerminalsScored() ? "true" : "false", pCol[3]->areTerminalsScored() ? "true" : "false", pCol[4]->areTerminalsScored() ? "true" : "false",
          // pCol[5]->areTerminalsScored() ? "true" : "false", pCol[6]->areTerminalsScored() ? "true" : "false", pCol[7]->areTerminalsScored() ? "true" : "false");          
       }
+#ifdef DEBUG
+      clock_t clockNow5 = clock();
+      clock_t clockElapsed5 = clockNow5 - clockStart;
+      clock_t clockThis5 = clockNow5 - startTerminalScoring;
+      printf ("Done scoring terminals. Finished in %.3f sec, elapsed %.3f sec\n",
+         ((float)clockThis5) / CLOCKS_PER_SEC, ((float)clockElapsed5) / CLOCKS_PER_SEC);
+      fflush(stdout);
+#endif
       // TERMINAL SCORING CHANGE ENDS
 
       // NON-TERMINAL SCORING STARTS
+#ifdef DEBUG
+      clock_t startNonTermianScoring = clock();
+#endif
       if(i > 0)
       {
          // printf("Before delete. Length of m_topNodesToTraverse: %u, Length of m_childNodesToDelete: %u\n", this->m_topNodesToTraverse.getLength(),
@@ -2168,6 +2199,14 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             printf( "Not scoring nodes as terminals in column %u are not scored yet.\n", i-1);
          }*/
       }
+#ifdef DEBUG
+      clock_t clockNow6 = clock();
+      clock_t clockElapsed6 = clockNow6 - clockStart;
+      clock_t clockThis6 = clockNow6 - startNonTermianScoring;
+      printf ("Done scoring the non-terminals. %.3f sec, elapsed %.3f sec\n",
+         ((float)clockThis6) / CLOCKS_PER_SEC, ((float)clockElapsed6) / CLOCKS_PER_SEC);
+      fflush(stdout);
+#endif
       // NON-TERMINAL SCORING ENDS
 
       // Clean up reference to pV created above
