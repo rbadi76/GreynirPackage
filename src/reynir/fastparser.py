@@ -223,6 +223,7 @@ class ParseJob:
 
         if(len(terminals_number_set) <= 1):
             # No ambiguity to resolve here
+            self.scores[column_number] = score_dict
             return True
         
         token = self.tokens[column_number] 

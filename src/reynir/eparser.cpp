@@ -1049,7 +1049,6 @@ void Node::addFamily(Production* pProd, Node* pW, Node* pV, UINT i, INT nSymbolV
          Node* terminalNodeW = new Node(labelW, parser, nHandle);
          p->p1 = terminalNodeW; // No need to add reference here as it happens automatically when the new terminal node is created here above.
          // printf("addFamily pW - Added terminal %d to terminals set for column/getI: %u. getJ: %u, i: %u\n", nSymbolW, tokenLabelW.getI(), tokenLabelW.getJ(), i);
-         // Helper::printProduction(pState);
       }
       else
       {
@@ -1077,7 +1076,6 @@ void Node::addFamily(Production* pProd, Node* pW, Node* pV, UINT i, INT nSymbolV
          Node* terminalNodeV = new Node(labelV, parser, nHandle);
          p->p2 = terminalNodeV; // No need to add reference here as it happens automatically when the new terminal node is created here above.
          // printf("addFamily pV - Added terminal %d to terminals set for column/getI: %u, getJ: %u, i: %u.\n", nSymbolV, tokenLabelV.getI(), tokenLabelV.getJ(), i);
-         // Helper::printProduction(pState);
       }
       else
       {
@@ -2048,10 +2046,10 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
                   pCol[i + 1]->getPsiDicts(j)->lookupOrAdd(pQ0);
                   // printf("Yes, in Psi set for column %d.\n", j);
                }
-               else
+               /*else
                {
-                  // printf("No, as far as items in set Q' are concerned, not in E_%u's Psi set for column %d.\n", i, j);
-               }
+                  printf("No, as far as items in set Q' are concerned, not in E_%u's Psi set for column %d.\n", i, j);
+               }*/
             }
             pQ0 = pQ0->getNext();
          }
@@ -2104,11 +2102,13 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
                }
             }
          } 
-
-         // This printout debugging only works with text2 as the columns are hard-coded
-         // printf("Columns scored: [0]: %s, [1]: %s, [2]: %s, [3]: %s, [4]: %s, [5]: %s, [6]: %s, [7]: %s.\n", pCol[0]->areTerminalsScored() ? "true" : "false",
-         // pCol[1]->areTerminalsScored() ? "true" : "false", pCol[2]->areTerminalsScored() ? "true" : "false", pCol[3]->areTerminalsScored() ? "true" : "false", pCol[4]->areTerminalsScored() ? "true" : "false",
-         // pCol[5]->areTerminalsScored() ? "true" : "false", pCol[6]->areTerminalsScored() ? "true" : "false", pCol[7]->areTerminalsScored() ? "true" : "false");     
+  
+         /*printf("Columns scored: ");
+         for(UINT j=0; j <= nTokens; j++)
+         {
+            printf("[%u]: %s, ", j, pCol[j]->areTerminalsScored() ? "true" : "false");
+         }
+         printf("\n");*/
       }
       else if(i == nTokens)
       {
@@ -2133,11 +2133,13 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
                // printf( "Max position set to %u\n", nMaxPositionToScore);
             }
          } 
-
-         // This printout debugging only works with text2 as the columns are hard-coded
-         // printf("Columns scored: [0]: %s, [1]: %s, [2]: %s, [3]: %s, [4]: %s, [5]: %s, [6]: %s, [7]: %s.\n", pCol[0]->areTerminalsScored() ? "true" : "false",
-         // pCol[1]->areTerminalsScored() ? "true" : "false", pCol[2]->areTerminalsScored() ? "true" : "false", pCol[3]->areTerminalsScored() ? "true" : "false", pCol[4]->areTerminalsScored() ? "true" : "false",
-         // pCol[5]->areTerminalsScored() ? "true" : "false", pCol[6]->areTerminalsScored() ? "true" : "false", pCol[7]->areTerminalsScored() ? "true" : "false");          
+       
+         /*printf("Columns scored: ");
+         for(UINT j=0; j <= nTokens; j++)
+         {
+            printf("[%u]: %s, ", j, pCol[j]->areTerminalsScored() ? "true" : "false");
+         }
+         printf("\n");*/
       }
       // TERMINAL SCORING CHANGE ENDS
 
