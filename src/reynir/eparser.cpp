@@ -178,12 +178,12 @@ private:
    HashBin m_aHash[HASH_BINS]; // The hash bin array
    UINT m_nEnumBin; // Round robin used during enumeration of states
    
-   BenOrPsiDict m_oBenDict; // Dictionary of states / Earley items conforming to type BΣN (for scoring)
+   TauOrPsiDict m_oTauDict; // Dictionary of states / Earley items conforming to type Tau (for scoring)
    UINT m_nLength; // The number of items in the Earley set / column
    BOOL m_bAreTerminalsScored; // Indicates if the terminals for this column have been scored yet
-   BenOrPsiDict* m_pNonPsiDict; // Dictionary of states used as a HELPER or TEMPORARY LIST to find items to conforming to type ψ (small psi)
-   BenOrPsiDict** m_pPsiDicts; // Dictionary of states / Earley items conforming to type ψ (small psi) that point, perhaps indirectly, 
-                                      // to BΣN items within previous and current Earley sets / column which have propagated to the current Earley set / column.
+   TauOrPsiDict* m_pNonPsiDict; // Dictionary of states used as a HELPER or TEMPORARY LIST to find items to conforming to type ψ (small psi)
+   TauOrPsiDict** m_pPsiDicts; // Dictionary of states / Earley items conforming to type ψ (small psi) that point, perhaps indirectly, 
+                                      // to Tau items within previous and current Earley sets / column which have propagated to the current Earley set / column.
 
    BOOL m_bDelayTerminalScoring;
 
@@ -216,11 +216,11 @@ public:
    BOOL areTerminalsScored();
    void setTerminalsScored();
    UINT getLength();
-   BOOL correspondingBenStateExists(INT nt, UINT h);
+   BOOL correspondingTauStateExists(INT nt, UINT h);
    void addToNonPsiDict(State* pState);
    void addToPsiDicts(State* pState, UINT colNum);
-   BenOrPsiDict* getNonPsiDictPointer();
-   BenOrPsiDict* getPsiDicts(UINT colNum);
+   TauOrPsiDict* getNonPsiDictPointer();
+   TauOrPsiDict* getPsiDicts(UINT colNum);
    BOOL shouldTerminalScoringBeDelayed();
    void setTerminalScoringShouldBeDelayed(BOOL val);
    void initializePsiSets(UINT cols);
@@ -495,8 +495,8 @@ Column::Column(Parser* pParser, UINT nToken)
    // Initialize the hash bins to zero
    memset(this->m_aHash, 0, sizeof(HashBin) * HASH_BINS);
 
-   this->m_oBenDict = BenOrPsiDict();
-   this->m_pNonPsiDict = new BenOrPsiDict();
+   this->m_oTauDict = TauOrPsiDict();
+   this->m_pNonPsiDict = new TauOrPsiDict();
 }
 
 Column::~Column(void)
@@ -580,15 +580,15 @@ BOOL Column::addState(State* p)
       p->setNtNext(psHead);
       psHead = p;
    }
-   // If we are adding state on the form BΣN, add it to the BenDict.
+   // If we are adding state on the form Tau, add it to the TauDict.
    // Note! Since Greynir departs from Scott's original paper by creating a token node just before the SCANNER which is 0 based, rather than 1 based, we must 
    // add 1 to the symbol for this to match correctly
    if(p->getNode() != NULL && p->getNode()->getLabel().getSymbol() + 1 == this->getToken() && p->prodDot() < 0)
    {
-      this->m_oBenDict.lookupOrAdd(p);
-      /*if(this->m_oBenDict.lookupOrAdd(p))
+      this->m_oTauDict.lookupOrAdd(p);
+      /*if(this->m_oTauDict.lookupOrAdd(p))
       {
-         printf("BEN item added for token position %u. Node's symbol is %d, prodDot is: %d, PR is:\n", this->m_nToken, p->getNode()->getLabel().getSymbol() + 1, p->prodDot());
+         printf("Tau item added for token position %u. Node's symbol is %d, prodDot is: %d, PR is:\n", this->m_nToken, p->getNode()->getLabel().getSymbol() + 1, p->prodDot());
          Helper::printProduction(p);
       }*/
    }
@@ -670,13 +670,13 @@ UINT Column::getLength()
    return this->m_nLength;
 }
 
-BOOL Column::correspondingBenStateExists(INT nt, UINT h)
+BOOL Column::correspondingTauStateExists(INT nt, UINT h)
 {
-   if(this->m_oBenDict.getHead() == NULL) return false;
+   if(this->m_oTauDict.getHead() == NULL) return false;
 
-   this->m_oBenDict.resetCurrentToHead();
+   this->m_oTauDict.resetCurrentToHead();
 
-   while(State* pState = this->m_oBenDict.next())
+   while(State* pState = this->m_oTauDict.next())
    {
       if(nt == pState->prodDot() && h == this->getToken()) return true;
    }
@@ -701,14 +701,14 @@ void Column::setTerminalScoringShouldBeDelayed(BOOL val)
 void Column::initializePsiSets(UINT cols)
 {
    if(cols == 0) cols = 1;
-   this->m_pPsiDicts = new BenOrPsiDict* [cols + 1];
+   this->m_pPsiDicts = new TauOrPsiDict* [cols + 1];
    for(UINT j = 0; j < cols + 1; j++)
    {
-      this->m_pPsiDicts[j] = new BenOrPsiDict();
+      this->m_pPsiDicts[j] = new TauOrPsiDict();
    }
 }
 
-BenOrPsiDict* Column::getNonPsiDictPointer()
+TauOrPsiDict* Column::getNonPsiDictPointer()
 {
    return this->m_pNonPsiDict;
 }
@@ -720,7 +720,7 @@ void Column::addToPsiDicts(State* pState, UINT nColNum)
    this->m_pPsiDicts[nColNum]->lookupOrAdd(pState);
 }
 
-BenOrPsiDict* Column::getPsiDicts(UINT nColNum)
+TauOrPsiDict* Column::getPsiDicts(UINT nColNum)
 {
    // We do not use PsiDict for column 0 but initialize it for simplicities' sake
    // (otherwise we'll have to deal with lots on null reference errors)
@@ -1171,7 +1171,7 @@ UINT Node::numCombinations(Node* pNode)
 INT* Node::getScore(UINT maxPosition)
 {
    // If this is a terminal
-   // As the terminal columns on the Python side are 0 based we only get < maxPosition. Otherwise we might ask for terminals that do not exist yet due to BΣN items
+   // As the terminal columns on the Python side are 0 based we only get < maxPosition. Otherwise we might ask for terminals that do not exist yet due to Tau items
    if(this->m_label.getSymbol() > 0 && this->m_label.getI() < maxPosition) 
    {
       // printf("Trying to call getGetScoreForTerminalFunc in the parser this time. Is null: %s\n", this->m_pParser->getGetScoreForTerminalFunc() == NULL ? "true" : "false");
@@ -1443,31 +1443,31 @@ UINT NodeDict2::getLength()
    return this->m_length;
 }
 
-BenOrPsiDict::BenOrPsiDict(void)
+TauOrPsiDict::TauOrPsiDict(void)
    : m_pHead(NULL), m_pCurrent(NULL), m_length(0)
 {
 }
 
-BenOrPsiDict::~BenOrPsiDict(void)
+TauOrPsiDict::~TauOrPsiDict(void)
 {
    this->reset();
 }
 
-BenOrPsiDict::BenOrPsiDictEntry* BenOrPsiDict::getHead()
+TauOrPsiDict::TauOrPsiDictEntry* TauOrPsiDict::getHead()
 {
    return this->m_pHead;
 }
 
-BOOL BenOrPsiDict::lookupOrAdd(State* pState)
+BOOL TauOrPsiDict::lookupOrAdd(State* pState)
 {
-   BenOrPsiDictEntry* p = this->m_pHead;
+   TauOrPsiDictEntry* p = this->m_pHead;
    while (p)
    {
       if(p->pState == pState) return false;
       p = p->pNext;
    }
    // Not found: add to the dict
-   p = new BenOrPsiDictEntry();
+   p = new TauOrPsiDictEntry();
    p->pState = pState;
    p->pNext = this->m_pHead;
    this->m_pHead = p;
@@ -1478,9 +1478,9 @@ BOOL BenOrPsiDict::lookupOrAdd(State* pState)
 /* 
    Just deletes the reference to the Earley item / state in the dictionary, not the actual node.
 */
-BOOL BenOrPsiDict::findAndDelete(State* pState)
+BOOL TauOrPsiDict::findAndDelete(State* pState)
 {
-   BenOrPsiDictEntry* p = this->m_pHead;
+   TauOrPsiDictEntry* p = this->m_pHead;
    if(p->pState == pState)
    {
       this->m_pHead = p->pNext;
@@ -1490,12 +1490,12 @@ BOOL BenOrPsiDict::findAndDelete(State* pState)
    }
    else
    {
-      BenOrPsiDictEntry* lastEntry = p;
+      TauOrPsiDictEntry* lastEntry = p;
       p = p->pNext;
       while (p) {
          if(p->pState == pState)
          {
-            BenOrPsiDictEntry* pNext = p->pNext;
+            TauOrPsiDictEntry* pNext = p->pNext;
             delete p;
             lastEntry->pNext = pNext;
             this->m_length--;
@@ -1509,9 +1509,9 @@ BOOL BenOrPsiDict::findAndDelete(State* pState)
    }
 }
 
-State* BenOrPsiDict::next()
+State* TauOrPsiDict::next()
 {
-   if(this->m_pCurrent == NULL) // We are at the beginning or BenOrPsiDict is empty
+   if(this->m_pCurrent == NULL) // We are at the beginning or TauOrPsiDict is empty
    {
       this->m_pCurrent = this->m_pHead; // In case of empty then m_pHead will be NULL also
    }
@@ -1526,11 +1526,11 @@ State* BenOrPsiDict::next()
 /*
    Delete all entries and start with a clean slate
 */ 
-void BenOrPsiDict::reset(void)
+void TauOrPsiDict::reset(void)
 {
-   BenOrPsiDictEntry* p = this->m_pHead;
+   TauOrPsiDictEntry* p = this->m_pHead;
    while(p) {
-      BenOrPsiDictEntry* pNext = p->pNext;
+      TauOrPsiDictEntry* pNext = p->pNext;
       delete p;
       p = pNext;
    }
@@ -1538,13 +1538,13 @@ void BenOrPsiDict::reset(void)
    this->m_length = 0;
 }
 
-UINT BenOrPsiDict::getLength()
+UINT TauOrPsiDict::getLength()
 {
    return this->m_length;
 }
 
 // Causes next() to start with the head in case m_pCurrent was somewhere in the middle.
-void BenOrPsiDict::resetCurrentToHead()
+void TauOrPsiDict::resetCurrentToHead()
 {
    this->m_pCurrent = NULL;
 }
@@ -1862,7 +1862,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
                {
                   for(UINT j = 1; j < nStart + 1; j++) // Check all Psi sets in column E_h
                   {
-                     BenOrPsiDict* psiDict = pCol[nStart]->getPsiDicts(j);
+                     TauOrPsiDict* psiDict = pCol[nStart]->getPsiDicts(j);
                      psiDict->resetCurrentToHead();
                      
                      while(State* pSt3 = psiDict->next())
@@ -1916,7 +1916,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       }
 
       // TERMINAL SCORING CHANGE STARTS
-      if(i < nTokens) // No need to do this in the last iteration since all token nodes in BΣN items will be adopted now if the token sequence is in the language of the CFG
+      if(i < nTokens) // No need to do this in the last iteration since all token nodes in Tau items will be adopted now if the token sequence is in the language of the CFG
       {
          // printf("BEFORE SCANNER: Before starting to look for upper level psi items. Will populate NonPsiDict now.\n");
          BOOL bUpperLevelPsiStateFound;
@@ -1956,7 +1956,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
                   // Look at PsiDict in this Earley set (column)
                   //printf("Looking into column %u. State: \n", nColNum);
                   //Helper::printProduction(pNonPsiState);
-                  BenOrPsiDict* pPsiDict_j_InCurrent = pEi->getPsiDicts(j);
+                  TauOrPsiDict* pPsiDict_j_InCurrent = pEi->getPsiDicts(j);
                   pPsiDict_j_InCurrent->resetCurrentToHead();
                   //printf("Going to loop through states in PsiDict for column %u, of length %u.\n", j, pPsiDict_j_InCurrent->getLength());
                   while(State* pSt4 = pPsiDict_j_InCurrent->next())
@@ -2078,7 +2078,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       if(i > 0 && i < nTokens)
       {
          // if(i==1) printf("Not scoring yet for i = 1 since we are 1-based on the C++ side when scoring the terminals. We will earliest score when i==2.\n");
-         for(UINT j = 1; j < i; j++)  // We only terminal-score the previous column provided the terminal scoring should not be further delayed due to BΣN and Psi items
+         for(UINT j = 1; j < i; j++)  // We only terminal-score the previous column provided the terminal scoring should not be further delayed due to Tau and Psi items
          {
             // printf("ROUND %u. Attempting to Score column %u:\n", i, j);
             // printf("pCol[%u]->areTerminalsScored() = %s, pCol[%u]->shouldTerminalScoringBeDelayed() = %s\n", j, pCol[j]->areTerminalsScored() ? "true" : "false", j, pCol[j]->shouldTerminalScoringBeDelayed() ? "true": "false");
@@ -2094,7 +2094,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
                // else printf("Scoring needs to be delayed. Propagated psi-items detected.");
 
                // Maximum position to score when scoring non-terminal nodes is the token position where we first encounter a column where
-               // we must delay the scoring of terminals due to the existens of items on the form BΣN
+               // we must delay the scoring of terminals due to the existens of items on the form Tau
                if(nMaxPositionToScore == 0) 
                {
                   nMaxPositionToScore = j-1; 
@@ -2127,7 +2127,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
                // printf( "Criteria not met. Not scoring this time.\n");
 
                // Maximum position to score when scoring non-terminal nodes is the token position where we first encounter a column where
-               // we must delay the scoring of terminals due to the existens of items on the form BΣN
+               // we must delay the scoring of terminals due to the existens of items on the form Tau
 
                nMaxPositionToScore = i; 
                // printf( "Max position set to %u\n", nMaxPositionToScore);
@@ -2252,15 +2252,15 @@ void Parser::helperAddLevel1PsiToPsiDict(UINT nOldCountE, UINT nOldCountQ, UINT*
    if(pEi->getLength() > nOldCountE || *pQLengthCounter > nOldCountQ)
    {
       // Earley item (state) was added. Check if it was on the form Psi level 1
-      // i.e. it point directly to a BΣN item
-      if(pEi->correspondingBenStateExists(psNew->getNt(), pEi->getToken()))
+      // i.e. it point directly to a Tau item
+      if(pEi->correspondingTauStateExists(psNew->getNt(), pEi->getToken()))
       {
          pEi->getPsiDicts(pEi->getToken())->lookupOrAdd(psNew);
       }
    }
 }
 
-BOOL Parser::helperStateIsInPsiSet(State* pState, BenOrPsiDict* pPsiSet)
+BOOL Parser::helperStateIsInPsiSet(State* pState, TauOrPsiDict* pPsiSet)
 {
    pPsiSet->resetCurrentToHead();
    while(State* pStateFromPsiSet = pPsiSet->next())
