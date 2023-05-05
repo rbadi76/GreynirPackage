@@ -25,6 +25,12 @@ for sent in d["sentences"]:
             "[Null]" if sent.tree is None else sent.tree.flat
         )
     )
+print("Done.")
+print("Number of sentences: {}".format(d["num_sentences"]))
+print("Thereof successfully parsed: {}".format(d["num_parsed"]))
+print("Average ambiguity factor: {}".format(d["ambiguity"]))
+print("Parse time: {}".format(d["parse_time"]))
+print("Reduction time: {}".format(d["reduce_time"]))
 
 
 '''
