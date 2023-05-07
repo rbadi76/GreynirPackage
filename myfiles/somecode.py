@@ -5,9 +5,36 @@ from reynir import Greynir
 g = Greynir()
 #sent = g.parse_single("Talið er að hún hafi verið á leiðinni til Íslands ásamt öðrum álftum þegar slysið varð.")
 
-'''fulltext = "Merki um stríðsglæpi Rússa sé að finna í nánast hverri einustu borg sem þeir hafa yfirgefið, segir Óskar Hallgrímsson ljósmyndari í Kænugarði. „Maður er alveg farinn að finna fyrir að fyrir að taugakerfið  er ekkert sérstaklega gott eftir að hafa verið með það útþanið í tæplega þrjá mánuði. En ég og kona mín erum ágætir félagar og styðjum hvort annað vel í þessu“ sagði Óskar í morgunþætti Rásar tvö í morgun. „Stríðið skilur eftir sig svakalegt sár hjá fólki og reiðin er orðin mikil. Rússar eru hættir að heyja stríð eins og maður myndi halda að hefðbundið stríð væri.  Nú ráðast þeir á borgarleg skotmörk og þær borgir sem Rússar hafa hertekið og yfirgefið eru í rúst. Það virðist vera merki um stríðsglæpi og nauðganir á nánast hverjum einasta stað sem þeir hafa verið ár.“"
+fulltext = "Hún réð sig til vinnu á gúmmíbát."
+"""Möguleg viðbrögð rædd.
+Merkingum mögulega ábótavant.
+Forsetinn með fiskabindi.
+Mannlíf í myndum.
+Þvert á evrópska bílaframleiðendur.
+Fjármálaráðuneytið bíður eftir RÚV.
+Lokahátíð Ólympíuleikanna í Ríó.
+Mjög skemmtilegt verkefni.
+Áttu þér uppáhaldshúðvörur?"""
 
-sents = fulltext.split(".")
+d = g.parse(fulltext)
+print("{0} sentences were parsed".format(d["num_parsed"]))
+for sent in d["sentences"]:
+    print("The parse tree for '{0}' is:\n{1}"
+        .format(
+            sent.tidy_text,
+            "[Null]" if sent.tree is None else sent.tree.flat
+        )
+    )
+print("Done.")
+print("Number of sentences: {}".format(d["num_sentences"]))
+print("Thereof successfully parsed: {}".format(d["num_parsed"]))
+print("Average ambiguity factor: {}".format(d["ambiguity"]))
+print("Parse time: {}".format(d["parse_time"]))
+print("Reduction time: {}".format(d["reduce_time"]))
+
+
+'''
+sents = fulltext.split("\n")
 
 i = 1
 for sent in sents:
@@ -20,7 +47,7 @@ for sent in sents:
         print("Sent " + str(i) + " is ambiguous: " + str(parsedSent._tree.is_ambiguous))
     else:
         print("Could not parse sentence. Error index: " + str(parsedSent.err_index))
-    i += 1'''
+    i += 1
 
 text1 = "Umframfiskur ratar á diska fátæka fólksins"
 text2 = "Hún réð sig til vinnu á gúmmíbát"
@@ -46,4 +73,4 @@ print("Parse time: {}".format(parse_time))
 print("Reduction time: {}".format(reduction_time))
 
 #print(sent.tree.view)
-#print("Is it?: " + str(sent._tree.is_ambiguous))
+#print("Is it?: " + str(sent._tree.is_ambiguous))'''

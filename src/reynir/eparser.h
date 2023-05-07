@@ -69,7 +69,7 @@ class State;
 class Column;
 class NodeDict;
 class NodeDict2;
-class BenOrPsiDict;
+class TauOrPsiDict;
 class Label;
 struct StateChunk;
 
@@ -331,7 +331,7 @@ public:
    static UINT numCombinations(Node*);
 
    INT* getScore(UINT maxPosition);
-   void doScore(UINT maxPosition, UINT level);
+   void doScore(UINT maxPosition);
 };
 
 class NodeDict2 {
@@ -366,20 +366,20 @@ private:
 
 };
 
-class BenOrPsiDict{
+class TauOrPsiDict{
 
 public:
 
-   BenOrPsiDict(void);
-   ~BenOrPsiDict(void);
+   TauOrPsiDict(void);
+   ~TauOrPsiDict(void);
 
-   struct BenOrPsiDictEntry {
+   struct TauOrPsiDictEntry {
       State* pState;
-      BenOrPsiDictEntry* pNext;
+      TauOrPsiDictEntry* pNext;
    };
 
    State* next();
-   BenOrPsiDictEntry* getHead();
+   TauOrPsiDictEntry* getHead();
 
    BOOL lookupOrAdd(State* pState);
    BOOL findAndDelete(State* pState);
@@ -390,8 +390,8 @@ public:
 
 private:
 
-   BenOrPsiDictEntry* m_pHead;
-   BenOrPsiDictEntry* m_pCurrent;
+   TauOrPsiDictEntry* m_pHead;
+   TauOrPsiDictEntry* m_pCurrent;
    UINT m_length;
 };
 
@@ -430,7 +430,7 @@ private:
 
    Node* makeNode(State* pState, UINT nEnd, Node* pV, NodeDict& ndV, UINT i, UINT nHandle);
    void helperAddLevel1PsiToPsiDict(UINT nOldCountE, UINT nOldCountQ, UINT* pQLengthCounter, Column* pEi, State* psNew);
-   BOOL helperStateIsInPsiSet(State* pState, BenOrPsiDict* pPsiSet);
+   BOOL helperStateIsInPsiSet(State* pState, TauOrPsiDict* pPsiSet);
 
    // Internal token/terminal matching cache management
    BYTE* allocCache(UINT nHandle, UINT nToken, BOOL* pbNeedsRelease);
