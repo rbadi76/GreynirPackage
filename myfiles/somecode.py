@@ -5,7 +5,7 @@ from reynir import Greynir
 g = Greynir()
 #sent = g.parse_single("Talið er að hún hafi verið á leiðinni til Íslands ásamt öðrum álftum þegar slysið varð.")
 
-fulltext = "Mjög skemmtilegt verkefni."
+fulltext = "Hún réð sig til vinnu á gúmmíbát."
 """Möguleg viðbrögð rædd.
 Merkingum mögulega ábótavant.
 Forsetinn með fiskabindi.

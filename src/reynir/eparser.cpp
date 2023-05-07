@@ -1740,6 +1740,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
    UINT* pQLengthCounter;
    UINT nOldCountQ;
    UINT nOldCountE;
+   UINT nMaxPositionToScore = 0;
    // TERMINAL SCORING ADDITION ENDS
 
    for (i = 0; i < nTokens + 1; i++) {
@@ -2072,7 +2073,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       }*/
 
       // Score the terminals
-      UINT nMaxPositionToScore = 0;
+      BOOL bEncounteredUnscored = false;
       if(i > 0 && i < nTokens)
       {
          // if(i==1) printf("Not scoring yet for i = 1 since we are 1-based on the C++ side when scoring the terminals. We will earliest score when i==2.\n");
@@ -2085,20 +2086,28 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
                // printf("Scoring terminals ...\n");
                this->m_pStartScoringTerminalsForColumnFunc(nHandle, j-1); // Token position is 0 based on the Python side
                pCol[j]->setTerminalsScored();
+               if(!bEncounteredUnscored) nMaxPositionToScore = j-1;
             }
-            else
+            /*else if(pCol[j]->areTerminalsScored() == true)
             {
-               // if(pCol[j]->areTerminalsScored() == true) printf("Column's terminals already scored.\n");
-               // else printf("Scoring needs to be delayed. Propagated psi-items detected.");
-
-               // Maximum position to score when scoring non-terminal nodes is the token position where we first encounter a column where
-               // we must delay the scoring of terminals due to the existens of items on the form Tau
-               if(nMaxPositionToScore == 0) 
-               {
-                  nMaxPositionToScore = j-1; 
-                  // printf( "Max position set to %u\n", nMaxPositionToScore);
-               }
+               printf("Column %u is already scored.\n", j);
             }
+            else if(pCol[j]->shouldTerminalScoringBeDelayed())
+            {
+               printf("Scoring column %u should be delayed.\n", j);
+            }*/
+            
+            if(nMaxPositionToScore < j && pCol[j]->areTerminalsScored() && !bEncounteredUnscored)
+            {
+               // printf("Max position set to %u.\n", j);
+               nMaxPositionToScore = j;
+            }
+            if(nMaxPositionToScore < j && !pCol[j]->areTerminalsScored() && !bEncounteredUnscored)
+            {
+               // printf("Encountered an unscored column once.\n");
+               bEncounteredUnscored = true;
+            }
+
          } 
   
          /*printf("Columns scored: ");
@@ -2110,27 +2119,20 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       }
       else if(i == nTokens)
       {
+         // printf( "LAST ROUND %u. Now to score all remaining columns. Column %u:\n", i);
          for(int j = 1; j <= i; j++) 
          {
-            // printf( "LAST ROUND %u. Now to score all remaining columns. Column %u:\n", i, j);
-            // printf( "column %d. pCol[j]->areTerminalsScored() = %s, pCol[j]->shouldTerminalScoringBeDelayed() = %s\n", j, pCol[j]->areTerminalsScored() ? "true" : "false", pCol[j]->shouldTerminalScoringBeDelayed() ? "true": "false");
+            // printf("Column %d. pCol[j]->areTerminalsScored() = %s.\n", j, pCol[j]->areTerminalsScored() ? "true" : "false");
             if(pCol[j]->areTerminalsScored() == false)
             {
                // printf( "Scoring terminals ...\n");
                this->m_pStartScoringTerminalsForColumnFunc(nHandle, j-1); // Token position is 0 based on the Python side
                pCol[j]->setTerminalsScored();
             }
-            else
-            {
-               // printf( "Criteria not met. Not scoring this time.\n");
+         }
 
-               // Maximum position to score when scoring non-terminal nodes is the token position where we first encounter a column where
-               // we must delay the scoring of terminals due to the existens of items on the form Tau
-
-               nMaxPositionToScore = i; 
-               // printf( "Max position set to %u\n", nMaxPositionToScore);
-            }
-         } 
+         // printf("Setting max column to score = %u.\n", i);
+         nMaxPositionToScore = i;
        
          /*printf("Columns scored: ");
          for(UINT j=0; j <= nTokens; j++)
