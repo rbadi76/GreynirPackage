@@ -1675,6 +1675,11 @@ void Parser::push(UINT nHandle, State* pState, Column* pE, State*& pQ, StateChun
 Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
    UINT nTokens, const UINT pnToklist[])
 {
+#ifdef DEBUG
+   clock_t clockStart = clock();
+   clock_t clockBeginChunk = clockStart;
+#endif
+
    // If pnToklist is NULL, a sequence of integers 0..nTokens-1 will be used
    // Sanity checks
    if (!nTokens)
@@ -1727,11 +1732,6 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
    UINT nNumNonterminals = this->getNumNonterminals();
    BYTE* pbSeen = new BYTE[nNumNonterminals];
 
-#ifdef DEBUG
-   clock_t clockStart = clock();
-   clock_t clockLast = clockStart;
-#endif
-
    // TERMINAL SCORING ADDITION STARTS
    // Counters declared
    UINT* pQLengthCounter;
@@ -1741,6 +1741,16 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
    // TERMINAL SCORING ADDITION ENDS
 
    for (i = 0; i < nTokens + 1; i++) {
+#ifdef DEBUG
+      clock_t clockEndChunk = clock();
+      clock_t clockElapsed = clockEndChunk - clockStart;
+      clock_t clockChunkLength = clockEndChunk - clockBeginChunk;
+      clock_t clockBeginForMainForLoop = clockEndChunk;
+      clockBeginChunk = clockBeginForMainForLoop;
+      // No need to print anything unless we are starting the very first iteration.
+      if(i == 0) printf ("Inistialization end to start of  before for-loop. Finished in %.3f sec, elapsed %.3f sec\n",
+         ((float)clockChunkLength) / CLOCKS_PER_SEC, ((float)clockElapsed) / CLOCKS_PER_SEC);
+#endif
 
       Column* pEi = pCol[i];
       pEi->resetEnum();
@@ -1782,10 +1792,16 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       memset(pbSeen, 0, nNumNonterminals * sizeof(BYTE));
 
 #ifdef DEBUG
-      clock_t clockStartWhile = clock();
+      clockEndChunk = clock();
+      clockElapsed = clockEndChunk - clockStart;
+      clockChunkLength = clockEndChunk - clockBeginChunk;
+      printf ("For loop beginning to start of while loop. Finished in %.3f sec, elapsed %.3f sec\n",
+         ((float)clockChunkLength) / CLOCKS_PER_SEC, ((float)clockElapsed) / CLOCKS_PER_SEC);
+      fflush(stdout);
+      clockBeginChunk = clock();
 #endif
-      while (pState) {
-
+      while (pState) 
+      {
          INT iItem = pState->prodDot();
 
          if (iItem < 0) {
@@ -1886,12 +1902,13 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
 
       }
 #ifdef DEBUG
-      clock_t clockNow2 = clock();
-      clock_t clockElapsed2 = clockNow2 - clockStart;
-      clock_t clockThis2 = clockNow2 - clockStartWhile;
+      clockEndChunk = clock();
+      clockElapsed = clockEndChunk - clockStart;
+      clockChunkLength = clockEndChunk - clockBeginChunk;
       printf ("While loop consuming R done. Finished in %.3f sec, elapsed %.3f sec\n",
-         ((float)clockThis2) / CLOCKS_PER_SEC, ((float)clockElapsed2) / CLOCKS_PER_SEC);
+         ((float)clockChunkLength) / CLOCKS_PER_SEC, ((float)clockElapsed) / CLOCKS_PER_SEC);
       fflush(stdout);
+      clockBeginChunk = clockEndChunk;
 #endif
 
 
@@ -1923,13 +1940,19 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
          // Open up the next column
          pCol[i + 1]->startParse(nHandle);
       }
-
+#ifdef DEBUG
+      clockEndChunk = clock();
+      clockElapsed = clockEndChunk - clockStart;
+      clockChunkLength = clockEndChunk - clockBeginChunk;
+      printf ("Pre SCANNER before terminal scoring. Finished in %.3f sec, elapsed %.3f sec\n",
+         ((float)clockChunkLength) / CLOCKS_PER_SEC, ((float)clockElapsed) / CLOCKS_PER_SEC);
+      fflush(stdout);
+      clockBeginChunk = clockEndChunk;
+#endif
       // TERMINAL SCORING CHANGE STARTS
       if(i < nTokens) // No need to do this in the last iteration since all token nodes in Tau items will be adopted now if the token sequence is in the language of the CFG
       {
-#ifdef DEBUG
-         clock_t clockStartUpperPsi = clock();
-#endif
+
          // printf("BEFORE SCANNER: Before starting to look for upper level psi items. Will populate NonPsiDict now.\n");
          BOOL bUpperLevelPsiStateFound;
          for(UINT j = 1; j < i + 1; j++)
@@ -1995,12 +2018,15 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
          
          // printf("BEFORE SCANNER: Done looking for upper level psi items. NonPsiDict length: %u.\n", pEi->getNonPsiDictPointer()->getLength());
 #ifdef DEBUG
-         clock_t clockNow3 = clock();
-         clock_t clockElapsed3 = clockNow3 - clockStart;
-         clock_t clockThis3 = clockNow3 - clockStartUpperPsi;
-         printf ("Done looking for upper level psi-items. Finished in %.3f sec, elapsed %.3f sec\n",
-            ((float)clockThis3) / CLOCKS_PER_SEC, ((float)clockElapsed3) / CLOCKS_PER_SEC);
+         clockEndChunk = clock();
+         clockElapsed = clockEndChunk - clockStart;
+         clockChunkLength = clockEndChunk - clockBeginChunk;
+         if(i < nTokens) printf ("Done looking for upper level psi-items. Finished in %.3f sec, elapsed %.3f sec\n",
+            ((float)clockChunkLength) / CLOCKS_PER_SEC, ((float)clockElapsed) / CLOCKS_PER_SEC);
+         else printf("Looking for upper level psi-items skipped. Finished in %.3f sec, elapsed %.3f sec\n", 
+            ((float)clockChunkLength) / CLOCKS_PER_SEC, ((float)clockElapsed) / CLOCKS_PER_SEC);
          fflush(stdout);
+         clockBeginChunk = clockEndChunk;
 #endif
       }
       // TERMINAL SCORING CHANGE ENDS
@@ -2032,10 +2058,17 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
 
       // if(i < nTokens) printf("Added %u items to E_%d and %u items to Q' after SCANNER.\n", pCol[i + 1]->getLength() - nOldCountE, i + 1, *pQLengthCounter);
 
-      // TERMINAL SCORING CHANGE STARTS
 #ifdef DEBUG
-      clock_t startCheckNextEitemsInPsiSets = clock();
+      clockEndChunk = clock();
+      clockElapsed = clockEndChunk - clockStart;
+      clockChunkLength = clockEndChunk - clockBeginChunk;
+      printf ("SCANNER done. Finished in %.3f sec, elapsed %.3f sec\n",
+         ((float)clockChunkLength) / CLOCKS_PER_SEC, ((float)clockElapsed) / CLOCKS_PER_SEC);
+      fflush(stdout);
+      clockBeginChunk = clockEndChunk;
 #endif
+
+      // TERMINAL SCORING CHANGE STARTS
       if(i > 0 && i < nTokens)
       {
          pCol[i + 1]->resetEnum();
@@ -2093,20 +2126,17 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       }
       
 #ifdef DEBUG
-      clock_t clockNow4 = clock();
-      clock_t clockElapsed4 = clockNow4 - clockStart;
-      clock_t clockThis4 = clockNow4 - startCheckNextEitemsInPsiSets;
+      clockEndChunk = clock();
+      clockElapsed = clockEndChunk - clockStart;
+      clockChunkLength = clockEndChunk - clockBeginChunk;
       printf ("Done checking if items in next Earley set are in any of Psi sets of the current column. Finished in %.3f sec, elapsed %.3f sec\n",
-         ((float)clockThis4) / CLOCKS_PER_SEC, ((float)clockElapsed4) / CLOCKS_PER_SEC);
+         ((float)clockChunkLength) / CLOCKS_PER_SEC, ((float)clockElapsed) / CLOCKS_PER_SEC);
       fflush(stdout);
+      clockBeginChunk = clockEndChunk;
 #endif
-
 
       // Score the terminals
       BOOL bEncounteredUnscored = false;
-#ifdef DEBUG
-      clock_t startTerminalScoring = clock();
-#endif
       if(i > 0 && i < nTokens)
       {
          // if(i==1) printf("Not scoring yet for i = 1 since we are 1-based on the C++ side when scoring the terminals. We will earliest score when i==2.\n");
@@ -2168,12 +2198,13 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
          // printf( "Max position set to %u\n", nMaxPositionToScore);       
       }
 #ifdef DEBUG
-      clock_t clockNow5 = clock();
-      clock_t clockElapsed5 = clockNow5 - clockStart;
-      clock_t clockThis5 = clockNow5 - startTerminalScoring;
+      clockEndChunk = clock();
+      clockElapsed = clockEndChunk - clockStart;
+      clockChunkLength = clockEndChunk - clockBeginChunk;
       printf ("Done scoring terminals. Finished in %.3f sec, elapsed %.3f sec\n",
-         ((float)clockThis5) / CLOCKS_PER_SEC, ((float)clockElapsed5) / CLOCKS_PER_SEC);
+         ((float)clockChunkLength) / CLOCKS_PER_SEC, ((float)clockElapsed) / CLOCKS_PER_SEC);
       fflush(stdout);
+      clockBeginChunk = clockEndChunk;
 #endif
       // TERMINAL SCORING CHANGE ENDS
 
@@ -2209,12 +2240,13 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
          }*/
       }
 #ifdef DEBUG
-      clock_t clockNow6 = clock();
-      clock_t clockElapsed6 = clockNow6 - clockStart;
-      clock_t clockThis6 = clockNow6 - startNonTermianScoring;
+      clockEndChunk = clock();
+      clockElapsed = clockEndChunk - clockStart;
+      clockChunkLength = clockEndChunk - clockBeginChunk;
       printf ("Done scoring the non-terminals. %.3f sec, elapsed %.3f sec\n",
-         ((float)clockThis6) / CLOCKS_PER_SEC, ((float)clockElapsed6) / CLOCKS_PER_SEC);
+         ((float)clockEndChunk) / CLOCKS_PER_SEC, ((float)clockElapsed) / CLOCKS_PER_SEC);
       fflush(stdout);
+      clockBeginChunk = clockEndChunk;
 #endif
       // NON-TERMINAL SCORING ENDS
 
@@ -2227,10 +2259,11 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
    // if(i == nTokens) Helper::printSets(pCol, i);
 
 #ifdef DEBUG
-      clock_t clockNow = clock();
-      clock_t clockElapsed = clockNow - clockStart;
-      clock_t clockThis = clockNow - clockLast;
-      clockLast = clockNow;
+      clockEndChunk = clock();
+      clockElapsed = clockEndChunk - clockStart;
+      clockChunkLength = clockEndChunk - clockBeginChunk;
+      printf("Done clearing references to nodes. Finished in %.3f, elapsed %.3f sec\n", ((float)clockEndChunk) / CLOCKS_PER_SEC, ((float)clockElapsed) / CLOCKS_PER_SEC);
+      clock_t clockThis = clockEndChunk - clockBeginForMainForLoop;
       printf ("Column %u finished in %.3f sec, elapsed %.3f sec\n", i,
          ((float)clockThis) / CLOCKS_PER_SEC, ((float)clockElapsed) / CLOCKS_PER_SEC);
       fflush(stdout);
@@ -2285,8 +2318,8 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
    clockNow = clock() - clockStart;
    printf("Cleanup finished, elapsed %.3f sec\n",
       ((float)clockNow) / CLOCKS_PER_SEC);
-   if (pResult)
-      pResult->dump(this->m_pGrammar);
+   //if (pResult)
+      // pResult->dump(this->m_pGrammar);
 #endif
 
    return pResult; // The caller should call delRef() on this after using it
