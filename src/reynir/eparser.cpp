@@ -218,9 +218,9 @@ public:
    UINT getLength();
    BOOL correspondingTauStateExists(INT nt, UINT h);
    void addToNonPsiDict(State* pState);
-   void addToPsiDicts(State* pState, UINT colNum);
+   void addToPsiDict(State* pState, UINT colNum);
    TauOrPsiDict* getNonPsiDictPointer();
-   TauOrPsiDict* getPsiDicts(UINT colNum);
+   TauOrPsiDict* getPsiDict(UINT colNum);
    BOOL shouldTerminalScoringBeDelayed();
    void setTerminalScoringShouldBeDelayed(BOOL val);
    void initializePsiSets(UINT cols);
@@ -713,14 +713,14 @@ TauOrPsiDict* Column::getNonPsiDictPointer()
    return this->m_pNonPsiDict;
 }
 
-void Column::addToPsiDicts(State* pState, UINT nColNum)
+void Column::addToPsiDict(State* pState, UINT nColNum)
 {
    // We do not use PsiDict for column 0 but initialize it for simplicities' sake
    // (otherwise we'll have to deal with lots on null reference errors)
    this->m_pPsiDicts[nColNum]->lookupOrAdd(pState);
 }
 
-TauOrPsiDict* Column::getPsiDicts(UINT nColNum)
+TauOrPsiDict* Column::getPsiDict(UINT nColNum)
 {
    // We do not use PsiDict for column 0 but initialize it for simplicities' sake
    // (otherwise we'll have to deal with lots on null reference errors)
@@ -1195,7 +1195,7 @@ INT* Node::getScore(UINT maxPosition)
    }
 }
 
-void Node::doScore(UINT maxPosition, UINT level)
+void Node::doScore(UINT maxPosition)
 {
    if(this->m_label.getSymbol() < 0 && !this->m_bHasScore && this->m_label.m_nI <= maxPosition)
    {
@@ -1207,12 +1207,12 @@ void Node::doScore(UINT maxPosition, UINT level)
       {
          if(p->p1)
          {
-            p->p1->doScore(maxPosition, level + 1);
+            p->p1->doScore(maxPosition);
             p1Score = p->p1->getScore(maxPosition);
          }
          if(p->p2)
          {
-            p->p2->doScore(maxPosition, level + 1);
+            p->p2->doScore(maxPosition);
             p2Score = p->p2->getScore(maxPosition);
          }
          
@@ -1751,8 +1751,8 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       // TERMINAL SCORING ADDITION STARTS
       // Counters reset in each iteration
       pQLengthCounter = new UINT(0);
-      UINT nOldCountQ = 0;
-      UINT nOldCountE = 0;
+      nOldCountQ = 0;
+      nOldCountE = 0;
       // printf("STARTING ROUND %u. Token is %u\n", i, pEi->getToken());
       // TERMINAL SCORING ADDITION ENDS
 
@@ -1844,7 +1844,6 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
                pH = ph;
             }
             State* psNt = pCol[nStart]->getNtHead(iNtB);
-            UINT completerCounter = 0;
             while (psNt) {
                Node* pY = this->makeNode(psNt, i, pW, ndV, i, nHandle);
                State* psNew = new (pChunkHead) State(psNt, pY);
@@ -1862,15 +1861,14 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
                {
                   for(UINT j = 1; j < nStart + 1; j++) // Check all Psi sets in column E_h
                   {
-                     TauOrPsiDict* psiDict = pCol[nStart]->getPsiDicts(j);
+                     TauOrPsiDict* psiDict = pCol[nStart]->getPsiDict(j);
                      psiDict->resetCurrentToHead();
                      
                      while(State* pSt3 = psiDict->next())
                      {
                         if(pSt3->getNt() == psNew->getNt() && pSt3->getProd() == psNew->getProd())
                         {
-                           completerCounter++;
-                           pEi->addToPsiDicts(psNew, j);
+                           pEi->addToPsiDict(psNew, j);
                         }
                      }
                   }
@@ -1890,7 +1888,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       /*printf("PSISETS: ");
       for(UINT j=0; j < i + 1; j++)
       {
-         printf("[%u]: %u, ",j, pEi->getPsiDicts(j)->getLength());
+         printf("[%u]: %u, ",j, pEi->getPsiDict(j)->getLength());
       }
       printf(".\n");*/
 
@@ -1950,13 +1948,13 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
                bUpperLevelPsiStateFound = false;
                pEi->getNonPsiDictPointer()->resetCurrentToHead();
                // printf("Going to loop through nonPsiDictsPointer which contains %u items.\n", pEi->getNonPsiDictPointer()->getLength());
-               UINT itemCount = 0;
+               // UINT itemCount = 0;
                while(State* pNonPsiState = pEi->getNonPsiDictPointer()->next())
                {
                   // Look at PsiDict in this Earley set (column)
                   //printf("Looking into column %u. State: \n", nColNum);
                   //Helper::printProduction(pNonPsiState);
-                  TauOrPsiDict* pPsiDict_j_InCurrent = pEi->getPsiDicts(j);
+                  TauOrPsiDict* pPsiDict_j_InCurrent = pEi->getPsiDict(j);
                   pPsiDict_j_InCurrent->resetCurrentToHead();
                   //printf("Going to loop through states in PsiDict for column %u, of length %u.\n", j, pPsiDict_j_InCurrent->getLength());
                   while(State* pSt4 = pPsiDict_j_InCurrent->next())
@@ -1972,7 +1970,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
                         // Remove from the non-psiState dictionary / linked list
                         pEi->getNonPsiDictPointer()->findAndDelete(pNonPsiState);
                         bUpperLevelPsiStateFound = true;
-                        itemCount++;
+                        // itemCount++;
                      }
                   }
                }
@@ -2006,7 +2004,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       printf("PSISETS: ");
       for(UINT j=0; j < i + 1; j++)
       {
-         printf("[%u]: %u, ", j, pEi->getPsiDicts(j)->getLength());
+         printf("[%u]: %u, ", j, pEi->getPsiDict(j)->getLength());
       }
       printf(".\n");*/
 
@@ -2024,10 +2022,10 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             for(UINT j = 1; j < i + 1; j++)
             {
                pCol[j]->setTerminalScoringShouldBeDelayed(false); // Set this to false everywhere initially.
-               if(pCol[j]->areTerminalsScored() == false && helperStateIsInPsiSet(pSt2, pEi->getPsiDicts(j)))
+               if(pCol[j]->areTerminalsScored() == false && helperStateIsInPsiSet(pSt2, pEi->getPsiDict(j)))
                {
                   pCol[j]->setTerminalScoringShouldBeDelayed(true);
-                  pCol[i + 1]->getPsiDicts(j)->lookupOrAdd(pSt2);
+                  pCol[i + 1]->getPsiDict(j)->lookupOrAdd(pSt2);
                   // printf("Yes, in Psi set for column %d.\n", j);
                }
                /*else
@@ -2040,10 +2038,10 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
          {
             for(UINT j = 1; j < i + 1; j++)
             {
-               if(pCol[j]->areTerminalsScored() == false && pCol[j]->shouldTerminalScoringBeDelayed() == false && helperStateIsInPsiSet(pQ0, pEi->getPsiDicts(j)))
+               if(pCol[j]->areTerminalsScored() == false && pCol[j]->shouldTerminalScoringBeDelayed() == false && helperStateIsInPsiSet(pQ0, pEi->getPsiDict(j)))
                {
                   pCol[j]->setTerminalScoringShouldBeDelayed(true);
-                  pCol[i + 1]->getPsiDicts(j)->lookupOrAdd(pQ0);
+                  pCol[i + 1]->getPsiDict(j)->lookupOrAdd(pQ0);
                   // printf("Yes, in Psi set for column %d.\n", j);
                }
                /*else
@@ -2057,7 +2055,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
          printf("PSISETS: ");
          for(UINT j=0; j < i + 2; j++)
          {
-            printf("[%u]: %u, ",j, pCol[i + 1]->getPsiDicts(j)->getLength());
+            printf("[%u]: %u, ",j, pCol[i + 1]->getPsiDict(j)->getLength());
          }
          printf(".\n");*/
       }
@@ -2163,7 +2161,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
             // Find the top-most node
             while(Node* nodeToScore = this->m_topNodesToTraverse.getTopNodeAndDeleteFromDict())
             {
-               nodeToScore->doScore(nMaxPositionToScore, 1);
+               nodeToScore->doScore(nMaxPositionToScore);
             }
          }
          /*else
@@ -2255,7 +2253,7 @@ void Parser::helperAddLevel1PsiToPsiDict(UINT nOldCountE, UINT nOldCountQ, UINT*
       // i.e. it point directly to a Tau item
       if(pEi->correspondingTauStateExists(psNew->getNt(), pEi->getToken()))
       {
-         pEi->getPsiDicts(pEi->getToken())->lookupOrAdd(psNew);
+         pEi->getPsiDict(pEi->getToken())->lookupOrAdd(psNew);
       }
    }
 }

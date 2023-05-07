@@ -331,7 +331,7 @@ public:
    static UINT numCombinations(Node*);
 
    INT* getScore(UINT maxPosition);
-   void doScore(UINT maxPosition, UINT level);
+   void doScore(UINT maxPosition);
 };
 
 class NodeDict2 {
