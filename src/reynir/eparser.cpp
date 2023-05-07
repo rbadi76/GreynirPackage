@@ -1200,7 +1200,6 @@ void Node::doScore(UINT maxPosition)
    if(this->m_label.getSymbol() < 0 && !this->m_bHasScore && this->m_label.m_nI <= maxPosition)
    {
       FamilyEntry* p = this->m_pHead;
-      INT familyCounter = 1;
       INT* p1Score = NULL;
       INT* p2Score = NULL;
       while(p)
@@ -1233,8 +1232,6 @@ void Node::doScore(UINT maxPosition)
          }
          
          p = p->pNext;
-
-         familyCounter++;
       }
       // Loop again through all families. If they have all been scored we can set
       // this->m_bHasScore to true and drop lower scoring families.
@@ -2240,8 +2237,8 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
    clockNow = clock() - clockStart;
    printf("Cleanup finished, elapsed %.3f sec\n",
       ((float)clockNow) / CLOCKS_PER_SEC);
-   //if (pResult)
-   //   pResult->dump(this->m_pGrammar);
+   if (pResult)
+      pResult->dump(this->m_pGrammar);
 #endif
 
    return pResult; // The caller should call delRef() on this after using it
