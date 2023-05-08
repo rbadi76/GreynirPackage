@@ -1750,6 +1750,8 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       // No need to print anything unless we are starting the very first iteration.
       if(i == 0) printf ("Inistialization end to start of  before for-loop. Finished in %.3f sec, elapsed %.3f sec\n",
          ((float)clockChunkLength) / CLOCKS_PER_SEC, ((float)clockElapsed) / CLOCKS_PER_SEC);
+      else printf("End of last iteration to start of new one. Finished in %.3f sec, elapsed %.3f sec\n",
+         ((float)clockChunkLength) / CLOCKS_PER_SEC, ((float)clockElapsed) / CLOCKS_PER_SEC);
 #endif
 
       Column* pEi = pCol[i];
@@ -1798,7 +1800,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       printf ("For loop beginning to start of while loop. Finished in %.3f sec, elapsed %.3f sec\n",
          ((float)clockChunkLength) / CLOCKS_PER_SEC, ((float)clockElapsed) / CLOCKS_PER_SEC);
       fflush(stdout);
-      clockBeginChunk = clock();
+      clockBeginChunk = clockEndChunk;
 #endif
       while (pState) 
       {
@@ -2244,7 +2246,7 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       clockElapsed = clockEndChunk - clockStart;
       clockChunkLength = clockEndChunk - clockBeginChunk;
       printf ("Done scoring the non-terminals. %.3f sec, elapsed %.3f sec\n",
-         ((float)clockEndChunk) / CLOCKS_PER_SEC, ((float)clockElapsed) / CLOCKS_PER_SEC);
+         ((float)clockChunkLength) / CLOCKS_PER_SEC, ((float)clockElapsed) / CLOCKS_PER_SEC);
       fflush(stdout);
       clockBeginChunk = clockEndChunk;
 #endif
@@ -2262,11 +2264,12 @@ Node* Parser::parse(UINT nHandle, INT iStartNt, UINT* pnErrorToken,
       clockEndChunk = clock();
       clockElapsed = clockEndChunk - clockStart;
       clockChunkLength = clockEndChunk - clockBeginChunk;
-      printf("Done clearing references to nodes. Finished in %.3f, elapsed %.3f sec\n", ((float)clockEndChunk) / CLOCKS_PER_SEC, ((float)clockElapsed) / CLOCKS_PER_SEC);
+      printf("Done clearing references to nodes. Finished in %.3f, elapsed %.3f sec\n", ((float)clockChunkLength) / CLOCKS_PER_SEC, ((float)clockElapsed) / CLOCKS_PER_SEC);
       clock_t clockThis = clockEndChunk - clockBeginForMainForLoop;
       printf ("Column %u finished in %.3f sec, elapsed %.3f sec\n", i,
          ((float)clockThis) / CLOCKS_PER_SEC, ((float)clockElapsed) / CLOCKS_PER_SEC);
       fflush(stdout);
+      clockBeginChunk = clockEndChunk;
 #endif
    }
 
